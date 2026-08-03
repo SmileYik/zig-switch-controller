@@ -1,0 +1,240 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{
+        .whitelist = espressif_targets,
+        .default_target = espressif_targets[0],
+    });
+    const optimize = b.standardOptimizeOption(.{});
+
+    const example = b.option([]const u8, "example", "Relative path (from project root) to the Zig source file") orelse "main/app.zig";
+
+    const obj = b.addObject(.{
+        .name = "app_zig",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(example),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    obj.root_module.addImport("esp_idf", idf_wrapped_modules(b));
+
+    const obj_install = b.addInstallArtifact(obj, .{
+        .dest_dir = .{
+            .override = .{
+                .custom = "obj",
+            },
+        },
+    });
+    b.getInstallStep().dependOn(&obj_install.step);
+}
+
+// ---------------------------------------------------------------------------
+// Module descriptor table
+//
+// To add a new module:
+//   1. Add a row here with the .zig source file and any deps by name.
+//   2. Add the name to the `esp_idf` entry's deps list if it should be
+//      re-exported through the top-level "esp_idf" namespace module.
+//
+// To add a new dependency inside an existing .zig source file:
+//   1. Add the dep name to the matching row's `deps` field here.
+//   That is the *only* place you need to edit — no other blocks to touch.
+// ---------------------------------------------------------------------------
+const ModuleSpec = struct {
+    /// Name used for @import("…") and as the key in the resolver map.
+    name: []const u8,
+    /// Path relative to the `imports/` directory.
+    file: []const u8,
+    /// Names of other modules (must appear earlier in this table).
+    deps: []const []const u8 = &.{},
+};
+
+/// Ordered list — a module may only reference deps that appear before it.
+const module_specs = [_]ModuleSpec{
+    // ── leaf (no deps) ──────────────────────────────────────────────────
+    .{ .name = "sys", .file = "idf-sys.zig" },
+    // ── depend on sys only ──────────────────────────────────────────────
+    .{ .name = "error", .file = "error.zig", .deps = &.{"sys"} },
+    .{ .name = "log", .file = "logger.zig", .deps = &.{"sys"} },
+    .{ .name = "ver", .file = "version.zig", .deps = &.{"sys"} },
+    .{ .name = "heap", .file = "heap.zig", .deps = &.{"sys"} },
+    .{ .name = "bootloader", .file = "bootloader.zig", .deps = &.{"sys"} },
+    .{ .name = "lwip", .file = "lwip.zig", .deps = &.{"sys"} },
+    .{ .name = "mqtt", .file = "mqtt.zig", .deps = &.{"sys"} },
+    .{ .name = "phy", .file = "phy.zig", .deps = &.{"sys"} },
+    .{ .name = "segger", .file = "segger.zig", .deps = &.{"sys"} },
+    .{ .name = "crc", .file = "crc.zig", .deps = &.{"sys"} },
+    // ── depend on sys + error ───────────────────────────────────────────
+    .{ .name = "bluetooth", .file = "bluetooth.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "led", .file = "led-strip.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "wifi", .file = "wifi.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "gpio", .file = "gpio.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "uart", .file = "uart.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "i2c", .file = "i2c.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "i2s", .file = "i2s.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "spi", .file = "spi.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "now", .file = "now.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "pulse", .file = "pcnt.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "http", .file = "http.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "dsp", .file = "dsp.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "hosted", .file = "hosted.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "wifi_remote", .file = "wifi_remote.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "pthread", .file = "pthread.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "timer", .file = "timer.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "ledc", .file = "ledc.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "twai", .file = "twai.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "pm", .file = "pm.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "matter", .file = "matter.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "rtos", .file = "rtos.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "nvs", .file = "nvs.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "partition", .file = "partition.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "sleep", .file = "sleep.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "event", .file = "event.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "wdt", .file = "wdt.zig", .deps = &.{ "sys", "error" } },
+    .{ .name = "nimble", .file = "nimble.zig", .deps = &.{ "sys", "error" } },
+    // ── depend on sys + log ────────────────────────
+    .{ .name = "panic", .file = "panic.zig", .deps = &.{ "sys", "log" } },
+};
+
+/// Names re-exported by the top-level "esp_idf" umbrella module (idf.zig).
+const esp_idf_exports = [_][]const u8{
+    "sys",         "error",  "log",       "ver",       "heap",  "bootloader", "lwip",   "mqtt",
+    "phy",         "segger", "crc",       "bluetooth", "led",   "wifi",       "gpio",   "uart",
+    "i2c",         "i2s",    "spi",       "now",       "pulse", "http",       "dsp",    "panic",
+    "rtos",        "nvs",    "partition", "sleep",     "event", "wdt",        "nimble", "hosted",
+    "wifi_remote", "timer",  "ledc",      "twai",      "pm",    "pthread",    "matter",
+};
+
+pub fn idf_wrapped_modules(b: *std.Build) *std.Build.Module {
+    const src_path = std.fs.path.dirname(@src().file) orelse b.pathResolve(&.{"."});
+    const imports_dir = b.pathJoin(&.{ src_path, "imports" });
+
+    // Build a name → *Module map so deps can be looked up by name.
+    var map = std.StringHashMap(*std.Build.Module).init(b.allocator);
+    defer map.deinit();
+
+    inline for (module_specs) |spec| {
+        // Collect this module's imports from the already-resolved map.
+        var imports: std.ArrayList(std.Build.Module.Import) = .empty;
+        defer imports.deinit(b.allocator);
+
+        inline for (spec.deps) |dep_name| {
+            const dep_mod = map.get(dep_name) orelse
+                @panic("dep '" ++ dep_name ++ "' not yet resolved — check ordering in module_specs");
+            imports.append(b.allocator, .{ .name = dep_name, .module = dep_mod }) catch @panic("OOM");
+        }
+
+        const mod = b.addModule(spec.name, .{
+            .root_source_file = b.path(b.pathJoin(&.{ imports_dir, spec.file })),
+            .imports = imports.items,
+        });
+        map.put(spec.name, mod) catch @panic("OOM");
+    }
+
+    // Build the esp_idf umbrella module's import list.
+    var top_imports: std.ArrayList(std.Build.Module.Import) = .empty;
+    defer top_imports.deinit(b.allocator);
+
+    inline for (esp_idf_exports) |name| {
+        const mod = map.get(name) orelse
+            @panic("export '" ++ name ++ "' not found in module_specs");
+        top_imports.append(b.allocator, .{ .name = name, .module = mod }) catch @panic("OOM");
+    }
+
+    return b.addModule("esp_idf", .{
+        .root_source_file = b.path(b.pathJoin(&.{ imports_dir, "idf.zig" })),
+        .imports = top_imports.items,
+    });
+}
+
+pub const espressif_targets: []const std.Target.Query = riscv_targets ++ xtensa_targets;
+
+const riscv_targets: []const std.Target.Query = blk: {
+    var result: []const std.Target.Query = &.{};
+
+    // Named ESP32 RISC-V CPU models — available when built with the Espressif Zig fork.
+    //   MC   group (c2, c3):               m+c+zicsr+zifencei          abi=none
+    //   MAC  group (c5, c6, c61, h2, h21): m+a+c+zicsr+zifencei        abi=none
+    //   MACF group (h4, s31, p4, p4eco4):  m+a+c+f+zicsr+zifencei      abi=eabihf
+    const plain_models = .{
+        "esp32c2",  "esp32c3",
+        "esp32c5",  "esp32c6",
+        "esp32c61", "esp32c61eco0",
+        "esp32h2",  "esp32h21",
+    };
+    for (plain_models) |name| {
+        if (@hasDecl(std.Target.riscv.cpu, name)) {
+            result = result ++ &[_]std.Target.Query{.{
+                .cpu_arch = .riscv32,
+                .cpu_model = .{ .explicit = &@field(std.Target.riscv.cpu, name) },
+                .os_tag = .freestanding,
+                .abi = .none,
+            }};
+        }
+    }
+
+    // MACF group: has FPU — use eabihf ABI.
+    const macf_models = .{
+        "esp32h4",     "esp32p4",
+        "esp32p4eco4", "esp32s31",
+    };
+    for (macf_models) |name| {
+        if (@hasDecl(std.Target.riscv.cpu, name)) {
+            result = result ++ &[_]std.Target.Query{.{
+                .cpu_arch = .riscv32,
+                .cpu_model = .{ .explicit = &@field(std.Target.riscv.cpu, name) },
+                .os_tag = .freestanding,
+                .abi = .eabihf,
+            }};
+        }
+    }
+
+    // Generic fallback targets for standard Zig builds without named ESP models.
+    if (result.len == 0) {
+        result = &[_]std.Target.Query{
+            // MC: c2, c3
+            .{
+                .cpu_arch = .riscv32,
+                .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 },
+                .os_tag = .freestanding,
+                .abi = .none,
+                .cpu_features_add = std.Target.riscv.featureSet(&.{ .m, .c, .zifencei, .zicsr }),
+            },
+            // MAC: c5, c6, c61, h2, h21
+            .{
+                .cpu_arch = .riscv32,
+                .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 },
+                .os_tag = .freestanding,
+                .abi = .none,
+                .cpu_features_add = std.Target.riscv.featureSet(&.{ .m, .a, .c, .zifencei, .zicsr }),
+            },
+            // MACF: h4, s31, p4, p4eco4
+            .{
+                .cpu_arch = .riscv32,
+                .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 },
+                .os_tag = .freestanding,
+                .abi = .eabihf,
+                .cpu_features_add = std.Target.riscv.featureSet(&.{ .m, .a, .c, .f, .zifencei, .zicsr }),
+            },
+        };
+    }
+
+    break :blk result;
+};
+
+const xtensa_targets: []const std.Target.Query = blk: {
+    var result: []const std.Target.Query = &.{};
+    for (.{ "esp32", "esp32s2", "esp32s3" }) |name| {
+        if (@hasDecl(std.Target.xtensa.cpu, name)) {
+            result = result ++ &[_]std.Target.Query{.{
+                .cpu_arch = .xtensa,
+                .cpu_model = .{ .explicit = &@field(std.Target.xtensa.cpu, name) },
+                .os_tag = .freestanding,
+                .abi = .none,
+            }};
+        }
+    }
+    break :blk result;
+};

@@ -4,6 +4,8 @@ const mod = @import("root.zig");
 const sys = mod.sys;
 const bt = mod.idf.bt;
 const log = std.log.scoped(.bluetooth);
+const Allocator = std.mem.Allocator;
+const Self = @This();
 
 const BTError = error{
     SendReportFailed,
@@ -15,11 +17,17 @@ const BTError = error{
     HIDDRegisterCallbackFailed,
     HIDDInitFailed,
     EnablePairingFailed,
+    SendWrongReport,
 };
 
 // ----------------------------
 // HIDD Things....
 // ----------------------------
+
+const EspHiddDescriptor = extern struct {
+    data: [*c]const u8,
+    dl_len: u16,
+};
 
 pub const HIDDType = enum(c_int) {
     init = sys.ESP_HIDD_INIT_EVT,
@@ -39,7 +47,7 @@ pub const HIDDEvent = union(HIDDType) {
 
 pub const HIDDCallback = *const fn (event: HIDDEvent) void;
 
-const HID_REPORT_DESCRIPTOR = [_]u8{
+const HID_REPORT_DESCRIPTOR = [_:0]u8{
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
     0x21, 0x75, 0x08, 0x95, 0x30, 0x81, 0x02, 0x85, 0x30, 0x09, 0x30, 0x75,
     0x08, 0x95, 0x30, 0x81, 0x02, 0x85, 0x31, 0x09, 0x31, 0x75, 0x08, 0x95,
@@ -56,39 +64,123 @@ const HID_REPORT_DESCRIPTOR = [_]u8{
     0x85, 0x12, 0x09, 0x12, 0x75, 0x08, 0x95, 0x30, 0x91, 0x02, 0xc0,
 };
 
-const HIDD_APP_PARAM: sys.esp_hidd_app_param_t = .{
-    .name = "Pro Controller",
-    .description = "Gamepad",
-    .provider = "Nintendo",
-    .subclass = 0x08,
-    .desc_list = @constCast(&HID_REPORT_DESCRIPTOR),
-    .desc_list_len = @intCast(HID_REPORT_DESCRIPTOR.len),
+// ----------------------------
+// GAP things
+// ----------------------------
+
+const GAP_COD: u32 = 0x002508;
+
+pub const Options = struct {
+    mac: [6]u8,
+    name: [:0]const u8 = "Pro Controller",
+    description: [:0]const u8 = "Gamepad",
+    provider: [:0]const u8 = "Nintendo",
+    send_report_offset: u8 = 0,
+    handler: ?*anyopaque = null,
 };
 
-const HIDD_QOS_IN: sys.esp_hidd_qos_param_t = .{
-    .service_type = 0x01,
-    .token_rate = 0,
-    .token_bucket_size = 0,
-    .peak_bandwidth = 0,
-    .delay_variation = 0,
-    .access_latency = 0,
-};
-const HIDD_QOS_OUT: sys.esp_hidd_qos_param_t = .{
-    .service_type = 0x01,
-    .token_rate = 0,
-    .token_bucket_size = 0,
-    .peak_bandwidth = 0,
-    .delay_variation = 0,
-    .access_latency = 0,
+// -------------------------------
+// handler interface
+// --------------------------------
+
+const HandlerInterface = struct {
+    ctx: *anyopaque,
+    handleHIDDFn: ?*const fn (ctx: *anyopaque, event: HIDDEvent) void = null,
+
+    pub fn init(handler: anytype) HandlerInterface {
+        var interface: HandlerInterface = .{ .ctx = handler };
+
+        const Pointer = @TypeOf(handler);
+        comptime {
+            const info = @typeInfo(Pointer);
+            if (info != .pointer or info.pointer.size != .one) {
+                @panic("Handler need be a container pointer");
+            }
+        }
+        if (std.meta.hasMethod(Pointer, "handleHIDD")) {
+            interface.handleHIDDFn = (struct {
+                fn handle(ctx: *anyopaque, event: HIDDEvent) void {
+                    var ptr: Pointer = @ptrCast(@alignCast(ctx));
+                    ptr.handleHIDD(event);
+                }
+            }).handle;
+        }
+
+        return interface;
+    }
 };
 
-var hiddCallbackFn: ?HIDDCallback = null;
+var INSTANCE: ?*Self = null;
 
-pub fn setHIDDCallback(callback: HIDDCallback) void {
-    hiddCallbackFn = callback;
+allocator: Allocator,
+
+mac: [6]u8,
+name: []const u8,
+description: []const u8,
+provider: []const u8,
+send_report_offset: u8,
+handler: HandlerInterface,
+hidd_app_param: sys.esp_hidd_app_param_t,
+hidd_qos_in: sys.esp_hidd_qos_param_t,
+hidd_qos_out: sys.esp_hidd_qos_param_t,
+
+pub fn init(allocator: Allocator, handler: anytype, opt: Options) !*Self {
+    const instance: *Self = try allocator.create(Self);
+    errdefer allocator.destroy(instance);
+
+    instance.* = .{
+        .allocator = allocator,
+        .mac = opt.mac,
+        .name = opt.name,
+        .description = opt.description,
+        .provider = opt.provider,
+        .send_report_offset = opt.send_report_offset,
+        .handler = HandlerInterface.init(handler),
+        .hidd_app_param = .{
+            .name = instance.name.ptr,
+            .description = instance.description.ptr,
+            .provider = instance.provider.ptr,
+            .subclass = 0x08,
+            .desc_list = @constCast(&HID_REPORT_DESCRIPTOR),
+            .desc_list_len = HID_REPORT_DESCRIPTOR.len,
+        },
+        .hidd_qos_in = .{
+            .service_type = 0x01,
+            .token_rate = 0,
+            .token_bucket_size = 0,
+            .peak_bandwidth = 0,
+            .delay_variation = 0,
+            .access_latency = 0,
+        },
+        .hidd_qos_out = .{
+            .service_type = 0x01,
+            .token_rate = 0,
+            .token_bucket_size = 0,
+            .peak_bandwidth = 0,
+            .delay_variation = 0,
+            .access_latency = 0,
+        },
+    };
+
+    if (INSTANCE) |ins| {
+        ins.deinit();
+        INSTANCE = null;
+    }
+    INSTANCE = instance;
+    try instance.start();
+    errdefer {
+        instance.deinit();
+        INSTANCE = null;
+    }
+    return instance;
 }
 
-pub fn enablePairing() !void {
+pub fn deinit(self: *Self) void {
+    // TODO
+    self.allocator.destroy(self);
+}
+
+pub fn enablePairing(_: *Self) !void {
     switch (sys.esp_bt_gap_set_scan_mode(
         sys.ESP_BT_CONNECTABLE,
         sys.ESP_BT_GENERAL_DISCOVERABLE,
@@ -101,82 +193,172 @@ pub fn enablePairing() !void {
     }
 }
 
+fn start(self: *Self) !void {
+    classicInit(self.mac) catch |err| {
+        log.err("Classic BT initialization failed: {s}", .{@errorName(err)});
+        return err;
+    };
+
+    switch (sys.esp_bt_gap_register_callback(&gapCallback)) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("GAP register callback failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.GAPRegisterCallbackFailed;
+        },
+    }
+
+    switch (esp_bt_gap_set_cod(GAP_COD, sys.ESP_BT_SET_COD_ALL)) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("GAP set COD failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.GAPSetCODFailed;
+        },
+    }
+
+    switch (sys.esp_bt_gap_set_security_param(
+        sys.ESP_BT_SP_IOCAP_MODE,
+        @constCast(&sys.ESP_BT_IO_CAP_NONE),
+        @sizeOf(sys.esp_bt_io_cap_t),
+    )) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("GAP set security param failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.GAPSetSecurityParamFailed;
+        },
+    }
+
+    switch (sys.esp_bt_gap_set_device_name(self.name.ptr)) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("GAP set device name failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.GAPSetDeviceNameFailed;
+        },
+    }
+
+    switch (sys.esp_bt_hid_device_register_callback(&hiddCallback)) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("HIDD register callback failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.HIDDRegisterCallbackFailed;
+        },
+    }
+
+    switch (sys.esp_bt_hid_device_init()) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("HIDD init failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.HIDDInitFailed;
+        },
+    }
+}
+
+inline fn callHIDDHandler(self: *Self, event: HIDDEvent) void {
+    if (self.handler.handleHIDDFn) |handle| {
+        handle(self.handler.ctx, event);
+    }
+}
+
+pub fn sendReport(self: *Self, data: []u8) !void {
+    log.debug("send report [len={d}]: {x}", .{ data.len, data });
+    if (data.len <= self.send_report_offset + 1) {
+        return BTError.SendWrongReport;
+    }
+
+    const report_id = data[self.send_report_offset];
+    const payload = data[self.send_report_offset + 1 ..];
+    switch (sys.esp_bt_hid_device_send_report(
+        sys.ESP_HIDD_REPORT_TYPE_INTRDATA,
+        report_id,
+        @intCast(payload.len),
+        payload.ptr,
+    )) {
+        sys.ESP_OK => return,
+        else => |err| {
+            log.err("send report failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.SendReportFailed;
+        },
+    }
+}
+
+fn classicInit(mac: [6]u8) !void {
+    switch (sys.esp_base_mac_addr_set(&mac)) {
+        sys.ESP_OK => {},
+        else => |err| {
+            log.err("sed mac address failed: {s}", .{sys.esp_err_to_name(err)});
+            return BTError.SetMacAddressFailed;
+        },
+    }
+
+    var cfg = bt.Controller.defaultConfig();
+    try bt.Controller.memRelease(.ble);
+    try bt.Controller.init(&cfg);
+    try bt.Controller.enable(.classic);
+    try bt.Bluedroid.init();
+    try bt.Bluedroid.enable();
+}
+
 export fn hiddCallback(
     event: sys.esp_hidd_cb_event_t,
     param: [*c]sys.esp_hidd_cb_param_t,
 ) callconv(.c) void {
-    const raw_evt: u32 = event;
-    switch (raw_evt) {
-        sys.ESP_HIDD_INIT_EVT => {
-            log.info("[HIDD] [INIT] prepare to init", .{});
-            switch (sys.esp_bt_hid_device_register_app(
-                @constCast(&HIDD_APP_PARAM),
-                @constCast(&HIDD_QOS_IN),
-                @constCast(&HIDD_QOS_OUT),
-            )) {
-                sys.ESP_OK => {},
-                else => |err| {
-                    log.err("[HIDD] [INIT] failed to init: {s}", .{sys.esp_err_to_name(err)});
-                },
-            }
-            if (hiddCallbackFn) |callback| {
-                callback(.{ .init = if (param == null) null else &param.*.init });
-            }
-        },
-
-        sys.ESP_HIDD_REGISTER_APP_EVT => {
-            log.info("[HIDD] [REGISTER_APP] wating for paring", .{});
-            enablePairing() catch {};
-            if (hiddCallbackFn) |callback| {
-                callback(.{ .register_app = if (param == null) null else &param.*.register_app });
-            }
-        },
-
-        sys.ESP_HIDD_OPEN_EVT => {
-            log.info("[HIDD] [OPEN] connecting", .{});
-
-            if (hiddCallbackFn) |callback| {
-                callback(.{ .open = if (param == null) null else &param.*.open });
-            }
-        },
-
-        sys.ESP_HIDD_CLOSE_EVT => {
-            log.warn("[HIDD] [CLOSE] closing", .{});
-
-            enablePairing() catch {};
-            if (hiddCallbackFn) |callback| {
-                callback(.{ .close = if (param == null) null else &param.*.close });
-            }
-        },
-
-        sys.ESP_HIDD_INTR_DATA_EVT => {
-            if (hiddCallbackFn) |callback| {
-                callback(.{ .intr = if (param == null) null else &param.*.intr_data });
-            }
-            if (builtin.mode == .Debug) {
-                if (param != null and param.*.intr_data.data != null) {
-                    const intr = param.*.intr_data;
-                    log.info(
-                        "[HIDD] [INTR] [len={d}] [id={x}]: {x}",
-                        .{
-                            intr.len,
-                            intr.report_id,
-                            intr.data[0..intr.len],
-                        },
-                    );
+    if (INSTANCE) |ins| {
+        switch (event) {
+            sys.ESP_HIDD_INIT_EVT => {
+                log.info("[HIDD] [INIT] prepare to init", .{});
+                switch (sys.esp_bt_hid_device_register_app(
+                    @constCast(&ins.hidd_app_param),
+                    @constCast(&ins.hidd_qos_in),
+                    @constCast(&ins.hidd_qos_out),
+                )) {
+                    sys.ESP_OK => {},
+                    else => |err| {
+                        log.err("[HIDD] [INIT] failed to init: {s}", .{sys.esp_err_to_name(err)});
+                    },
                 }
-            }
-        },
+                ins.callHIDDHandler(.{ .init = if (param == null) null else &param.*.init });
+            },
 
-        else => {},
+            sys.ESP_HIDD_REGISTER_APP_EVT => {
+                log.info("[HIDD] [REGISTER_APP] wating for paring", .{});
+                ins.enablePairing() catch {};
+                ins.callHIDDHandler(.{ .register_app = if (param == null) null else &param.*.register_app });
+            },
+
+            sys.ESP_HIDD_OPEN_EVT => {
+                log.info("[HIDD] [OPEN] connecting", .{});
+
+                ins.callHIDDHandler(.{ .open = if (param == null) null else &param.*.open });
+            },
+
+            sys.ESP_HIDD_CLOSE_EVT => {
+                log.warn("[HIDD] [CLOSE] closing", .{});
+
+                ins.enablePairing() catch {};
+                ins.callHIDDHandler(.{ .close = if (param == null) null else &param.*.close });
+            },
+
+            sys.ESP_HIDD_INTR_DATA_EVT => {
+                ins.callHIDDHandler(.{ .intr = if (param == null) null else &param.*.intr_data });
+
+                if (builtin.mode == .Debug) {
+                    if (param != null and param.*.intr_data.data != null) {
+                        const intr = param.*.intr_data;
+                        log.info(
+                            "[HIDD] [INTR] [len={d}] [id={x}]: {x}",
+                            .{
+                                intr.len,
+                                intr.report_id,
+                                intr.data[0..intr.len],
+                            },
+                        );
+                    }
+                }
+            },
+
+            else => {},
+        }
     }
 }
-
-// ----------------------------
-// GAP things
-// ----------------------------
-
-const GAP_COD: u32 = 0x002508;
 
 /// re-export this function.
 extern fn esp_bt_gap_set_cod(cod: u32, mode: sys.esp_bt_cod_mode_t) callconv(.c) sys.esp_err_t;
@@ -221,100 +403,5 @@ export fn gapCallback(
         },
 
         else => {},
-    }
-}
-
-fn classicInit(mac: [6]u8) !void {
-    switch (sys.esp_base_mac_addr_set(&mac)) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("sed mac address failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.SetMacAddressFailed;
-        },
-    }
-
-    var cfg = bt.Controller.defaultConfig();
-    try bt.Controller.memRelease(.ble);
-    try bt.Controller.init(&cfg);
-    try bt.Controller.enable(.classic);
-    try bt.Bluedroid.init();
-    try bt.Bluedroid.enable();
-}
-
-pub fn init(mac: [6]u8) !void {
-    classicInit(mac) catch |err| {
-        log.err("Classic BT initialization failed: {s}", .{@errorName(err)});
-        return err;
-    };
-
-    switch (sys.esp_bt_gap_register_callback(&gapCallback)) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("GAP register callback failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.GAPRegisterCallbackFailed;
-        },
-    }
-
-    switch (esp_bt_gap_set_cod(GAP_COD, sys.ESP_BT_SET_COD_ALL)) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("GAP set COD failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.GAPSetCODFailed;
-        },
-    }
-
-    switch (sys.esp_bt_gap_set_security_param(
-        sys.ESP_BT_SP_IOCAP_MODE,
-        @constCast(&sys.ESP_BT_IO_CAP_NONE),
-        @sizeOf(sys.esp_bt_io_cap_t),
-    )) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("GAP set security param failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.GAPSetSecurityParamFailed;
-        },
-    }
-
-    switch (sys.esp_bt_gap_set_device_name("Pro Controller")) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("GAP set device name failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.GAPSetDeviceNameFailed;
-        },
-    }
-
-    switch (sys.esp_bt_hid_device_register_callback(&hiddCallback)) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("HIDD register callback failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.HIDDRegisterCallbackFailed;
-        },
-    }
-
-    switch (sys.esp_bt_hid_device_init()) {
-        sys.ESP_OK => {},
-        else => |err| {
-            log.err("HIDD init failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.HIDDInitFailed;
-        },
-    }
-}
-
-pub fn sendReport(data: []u8) !void {
-    log.info("send report [len={d}]: {x}", .{ data.len, data });
-
-    const report_id = data[0];
-    const payload = data[1..];
-    switch (sys.esp_bt_hid_device_send_report(
-        sys.ESP_HIDD_REPORT_TYPE_INTRDATA,
-        report_id,
-        @intCast(payload.len),
-        &payload[0],
-    )) {
-        sys.ESP_OK => return,
-        else => |err| {
-            log.err("send report failed: {s}", .{sys.esp_err_to_name(err)});
-            return BTError.SendReportFailed;
-        },
     }
 }

@@ -56,10 +56,10 @@ export fn reportTask(_: ?*anyopaque) callconv(.c) void {
                 .incoming => |s| {
                     controller.processCommands(s);
                     defer controller.clearReport();
-                    bt.sendReport(controller.report[0..]) catch {};
+                    bluetooth.sendReport(controller.report[0..]) catch {};
                 },
                 .sending => |s| {
-                    bt.sendReport(s) catch {};
+                    bluetooth.sendReport(s) catch {};
                 },
                 .press_button => |s| {
                     controller.setFullInputReport();
@@ -69,7 +69,7 @@ export fn reportTask(_: ?*anyopaque) callconv(.c) void {
                         controller.setButtonInputs(s.upper, s.shared, s.lower);
                     }
                     defer controller.clearReport();
-                    bt.sendReport(controller.report[0..]) catch {};
+                    bluetooth.sendReport(controller.report[0..]) catch {};
                 },
             }
         }
@@ -83,9 +83,9 @@ var controller = ControllerProtocol.init(.{
     .controller_type = .pro_controller,
     .bt_address_mac = switch_mac,
     .parser = .{
-        .data_len = 49,
+        .data_len = 48,
         .magic_head = null,
-        .payload_len = 10,
+        .payload_len = 9,
     },
 });
 var is_connected: bool = false;
@@ -94,36 +94,39 @@ var is_connected: bool = false;
 // 5. HID Callback
 // ---------------------------------------------------------------------------
 
-fn hiddCallback(event: bt.HIDDEvent) void {
-    switch (event) {
-        .open => {
-            controller.processCommands(&[_]u8{});
-            defer controller.clearReport();
-            bt.sendReport(controller.report[0..]) catch {};
-            is_connected = true;
-        },
-        .close => {
-            is_connected = false;
-        },
-        .intr => |intr_opt| {
-            if (intr_opt) |intr| {
-                if (intr.data != null and intr.len > 0) {
-                    const rx_slice = intr.data[0..intr.len];
+const BTHandler = struct {
+    pub fn handleHIDD(_: *BTHandler, event: bt.HIDDEvent) void {
+        log.info("handling hidd", .{});
+        switch (event) {
+            .open => {
+                controller.processCommands(&[_]u8{});
+                defer controller.clearReport();
+                bluetooth.sendReport(controller.report[0..]) catch {};
+                is_connected = true;
+            },
+            .close => {
+                is_connected = false;
+            },
+            .intr => |intr_opt| {
+                if (intr_opt) |intr| {
+                    if (intr.data != null and intr.len > 0) {
+                        const rx_slice = intr.data[0..intr.len];
 
-                    report_queue.enqueue(.{ .incoming = rx_slice }) catch |e| {
-                        log.err("error when enqueue: {}", .{e});
-                    };
+                        report_queue.enqueue(.{ .incoming = rx_slice }) catch |e| {
+                            log.err("error when enqueue: {}", .{e});
+                        };
+                    }
                 }
-            }
-        },
-        else => {},
+            },
+            else => {},
+        }
     }
-}
+};
 
 // ---------------------------------------------------------------------------
 // 6. 初始化与 app_main
 // ---------------------------------------------------------------------------
-
+var bluetooth: *bt = undefined;
 export fn app_main() callconv(.c) void {
     var heap = idf.heap.HeapCapsAllocator.init(.{ .@"8bit" = true });
     var arena = std.heap.ArenaAllocator.init(heap.allocator());
@@ -144,11 +147,19 @@ export fn app_main() callconv(.c) void {
         return;
     };
 
-    bt.setHIDDCallback(&hiddCallback);
-    bt.init(switch_mac) catch |err| {
+    var btHandler = BTHandler{};
+    bluetooth = bt.init(
+        allocator,
+        &btHandler,
+        .{
+            .mac = switch_mac,
+            .send_report_offset = 1,
+        },
+    ) catch |err| {
         log.err("bluetooth 初始化失败: {s}", .{@errorName(err)});
         return;
     };
+    defer bluetooth.deinit();
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
     _ = idf.rtos.Task.create(reportTask, "report_task", 1024 * 8, null, 5) catch @panic("Task blink not created");

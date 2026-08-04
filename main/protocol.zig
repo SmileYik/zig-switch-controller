@@ -1,20 +1,12 @@
 const std = @import("std");
+const mod = @import("root.zig");
+
+const sys = mod.sys;
 const log = std.log.scoped(.switch_controller);
 
-pub const ControllerProtocol = @This();
+pub const Protocol = @This();
 pub const MAX_REPORT_SIZE = 50;
 const VIBRATOR_BYTES = [_]u8{ 0xA0, 0xB0, 0xC0, 0x90 };
-
-var random: *const fn () callconv(.c) u32 = undefined;
-var get_time: *const fn () callconv(.c) i64 = undefined;
-
-pub fn initFn(
-    esp_random: *const fn () callconv(.c) u32,
-    esp_timer_get_time: *const fn () callconv(.c) i64,
-) void {
-    random = esp_random;
-    get_time = esp_timer_get_time;
-}
 
 /// 控制器类型定义
 pub const ControllerType = enum {
@@ -184,8 +176,8 @@ imu_enabled: bool = false,
 colour_body: [3]u8,
 colour_buttons: [3]u8,
 
-pub fn init(opt: Options) ControllerProtocol {
-    var self = ControllerProtocol{
+pub fn init(opt: Options) Protocol {
+    var self = Protocol{
         .parser = opt.parser,
         .bt_address = opt.bt_address_mac,
         .controller_type = opt.controller_type,
@@ -201,34 +193,34 @@ pub fn init(opt: Options) ControllerProtocol {
 }
 
 /// get current report buffer array. you should invoke `clearReport()` method after you send this report.
-pub fn gerReport(self: *ControllerProtocol) *[MAX_REPORT_SIZE]u8 {
+pub fn gerReport(self: *Protocol) *[MAX_REPORT_SIZE]u8 {
     return &self.report;
 }
 
 /// dupe report to your buf and clear self report.
-pub fn bufReport(self: *ControllerProtocol, dest: *[MAX_REPORT_SIZE]u8) void {
+pub fn bufReport(self: *Protocol, dest: *[MAX_REPORT_SIZE]u8) void {
     @memcpy(dest, &self.report);
     self.setEmptyReport();
 }
 
 /// allocate and dupe self report and return
-pub fn allocReport(self: *ControllerProtocol, allocator: std.mem.Allocator) ![]u8 {
+pub fn allocReport(self: *Protocol, allocator: std.mem.Allocator) ![]u8 {
     var report = try allocator.alloc(u8, MAX_REPORT_SIZE);
     self.bufReport(report[0..MAX_REPORT_SIZE]);
     return report;
 }
 
 /// you should invoke this method after get and send report.
-pub fn clearReport(self: *ControllerProtocol) void {
+pub fn clearReport(self: *Protocol) void {
     self.setEmptyReport();
 }
 
-inline fn setEmptyReport(self: *ControllerProtocol) void {
+inline fn setEmptyReport(self: *Protocol) void {
     @memset(&self.report, 0);
     self.report[0] = 0xA1;
 }
 
-pub fn processCommands(self: *ControllerProtocol, data: []const u8) void {
+pub fn processCommands(self: *Protocol, data: []const u8) void {
     const message = self.parser.parse(data);
 
     switch (message.response) {
@@ -279,18 +271,18 @@ pub fn processCommands(self: *ControllerProtocol, data: []const u8) void {
     }
 }
 
-pub fn setSubcommandReply(self: *ControllerProtocol) void {
+pub fn setSubcommandReply(self: *Protocol) void {
     self.report[1] = 0x21;
     self.vibrator_report = getRandomVibratorByte();
     self.setStandardInputReport();
 }
 
-pub fn setUnknownSubcommand(self: *ControllerProtocol, subcommand_id: u8) void {
+pub fn setUnknownSubcommand(self: *Protocol, subcommand_id: u8) void {
     self.report[15] = subcommand_id;
 }
 
-pub fn setTimer(self: *ControllerProtocol) void {
-    const now_us = get_time();
+pub fn setTimer(self: *Protocol) void {
+    const now_us = sys.esp_timer_get_time();
     if (self.last_timestamp_us == 0) {
         self.last_timestamp_us = now_us;
         self.report[2] = 0x00;
@@ -305,13 +297,13 @@ pub fn setTimer(self: *ControllerProtocol) void {
     self.last_timestamp_us = now_us;
 }
 
-pub fn setFullInputReport(self: *ControllerProtocol) void {
+pub fn setFullInputReport(self: *Protocol) void {
     self.report[1] = 0x30;
     self.setStandardInputReport();
     self.setImuData();
 }
 
-pub fn setStandardInputReport(self: *ControllerProtocol) void {
+pub fn setStandardInputReport(self: *Protocol) void {
     self.setTimer();
 
     if (self.device_info_queried) {
@@ -333,31 +325,31 @@ pub fn setStandardInputReport(self: *ControllerProtocol) void {
     }
 }
 
-pub fn setButtonInputs(self: *ControllerProtocol, upper: u8, shared: u8, lower: u8) void {
+pub fn setButtonInputs(self: *Protocol, upper: u8, shared: u8, lower: u8) void {
     self.report[4] = upper;
     self.report[5] = shared;
     self.report[6] = lower;
 }
 
-pub fn combineButtonInputs(self: *ControllerProtocol, upper: u8, shared: u8, lower: u8) void {
+pub fn combineButtonInputs(self: *Protocol, upper: u8, shared: u8, lower: u8) void {
     self.report[4] |= upper;
     self.report[5] |= shared;
     self.report[6] |= lower;
 }
 
-pub fn setLeftStickInputs(self: *ControllerProtocol, left: [3]u8) void {
+pub fn setLeftStickInputs(self: *Protocol, left: [3]u8) void {
     self.report[7] = left[0];
     self.report[8] = left[1];
     self.report[9] = left[2];
 }
 
-pub fn setRightStickInputs(self: *ControllerProtocol, right: [3]u8) void {
+pub fn setRightStickInputs(self: *Protocol, right: [3]u8) void {
     self.report[10] = right[0];
     self.report[11] = right[1];
     self.report[12] = right[2];
 }
 
-pub fn setDeviceInfo(self: *ControllerProtocol) void {
+pub fn setDeviceInfo(self: *Protocol) void {
     // ACK
     self.report[14] = 0x82;
     // Subcommand Reply
@@ -378,12 +370,12 @@ pub fn setDeviceInfo(self: *ControllerProtocol) void {
     self.report[27] = 0x01;
 }
 
-pub fn setShipment(self: *ControllerProtocol) void {
+pub fn setShipment(self: *Protocol) void {
     self.report[14] = 0x80;
     self.report[15] = 0x08;
 }
 
-pub fn toggleImu(self: *ControllerProtocol, message: Report) void {
+pub fn toggleImu(self: *Protocol, message: Report) void {
     if (message.subcommand.len > 1 and message.subcommand[1] == 0x01) {
         self.imu_enabled = true;
     } else {
@@ -393,7 +385,7 @@ pub fn toggleImu(self: *ControllerProtocol, message: Report) void {
     self.report[15] = 0x40;
 }
 
-pub fn setImuData(self: *ControllerProtocol) void {
+pub fn setImuData(self: *Protocol) void {
     if (!self.imu_enabled) return;
 
     const imu_data = [_]u8{
@@ -405,7 +397,7 @@ pub fn setImuData(self: *ControllerProtocol) void {
     replaceSubarray(&self.report, 14, &imu_data);
 }
 
-pub fn spiRead(self: *ControllerProtocol, message: Report) void {
+pub fn spiRead(self: *Protocol, message: Report) void {
     if (message.subcommand.len < 6) return;
 
     const addr_bottom = message.subcommand[1];
@@ -503,7 +495,7 @@ pub fn spiRead(self: *ControllerProtocol, message: Report) void {
     }
 }
 
-pub fn setMode(self: *ControllerProtocol, message: Report) void {
+pub fn setMode(self: *Protocol, message: Report) void {
     self.report[14] = 0x80;
     self.report[15] = 0x03;
 
@@ -518,18 +510,18 @@ pub fn setMode(self: *ControllerProtocol, message: Report) void {
     }
 }
 
-pub fn setTriggerButtons(self: *ControllerProtocol) void {
+pub fn setTriggerButtons(self: *Protocol) void {
     self.report[14] = 0x83;
     self.report[15] = 0x04;
 }
 
-pub fn enableVibration(self: *ControllerProtocol) void {
+pub fn enableVibration(self: *Protocol) void {
     self.report[14] = 0x82;
     self.report[15] = 0x48;
     self.vibration_enabled = true;
 }
 
-pub fn setPlayerLights(self: *ControllerProtocol, message: Report) void {
+pub fn setPlayerLights(self: *Protocol, message: Report) void {
     self.report[14] = 0x80;
     self.report[15] = 0x30;
 
@@ -547,12 +539,12 @@ pub fn setPlayerLights(self: *ControllerProtocol, message: Report) void {
     }
 }
 
-pub fn setNfcIrState(self: *ControllerProtocol) void {
+pub fn setNfcIrState(self: *Protocol) void {
     self.report[14] = 0x80;
     self.report[15] = 0x22;
 }
 
-pub fn setNfcIrConfig(self: *ControllerProtocol) void {
+pub fn setNfcIrConfig(self: *Protocol) void {
     self.report[14] = 0xA0;
     self.report[15] = 0x21;
 
@@ -570,7 +562,7 @@ inline fn replaceSubarray(slice: []u8, comptime start: usize, src: []const u8) v
 }
 
 inline fn getRandomVibratorByte() u8 {
-    const rand_idx = @as(usize, @intCast(random() % VIBRATOR_BYTES.len));
+    const rand_idx = @as(usize, @intCast(sys.esp_random() % VIBRATOR_BYTES.len));
     return VIBRATOR_BYTES[rand_idx];
 }
 

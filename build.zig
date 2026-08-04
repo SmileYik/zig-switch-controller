@@ -7,6 +7,14 @@ pub fn build(b: *std.Build) !void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
+    const mod = b.createModule(.{
+        .root_source_file = b.path("main/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mod.addImport("esp_idf", idf_wrapped_modules(b));
+
     const example = b.option([]const u8, "example", "Relative path (from project root) to the Zig source file") orelse "main/app.zig";
 
     const obj = b.addObject(.{
@@ -18,7 +26,7 @@ pub fn build(b: *std.Build) !void {
             .link_libc = true,
         }),
     });
-    obj.root_module.addImport("esp_idf", idf_wrapped_modules(b));
+    obj.root_module.addImport("mod", mod);
 
     const obj_install = b.addInstallArtifact(obj, .{
         .dest_dir = .{

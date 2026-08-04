@@ -3,13 +3,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
-const idf = @import("esp_idf");
+const mod = @import("mod");
+const idf = mod.idf;
 const sys = idf.sys;
 const bt = idf.bt;
 
-const ControllerProtocol = @import("protocol.zig");
+const ControllerProtocol = mod.Protocol;
 const log = std.log.scoped(.switch_controller);
-const queue = @import("queue.zig");
 
 const COMBINE_PRESSED_BUTTON = true;
 
@@ -23,7 +23,7 @@ const ReportType = union(ReportTag) {
     sending: []u8,
     press_button: struct { upper: u8, shared: u8, lower: u8 },
 };
-const Queue = queue.Queue(ReportType, 16);
+const Queue = mod.Queue(ReportType, 16);
 var report_queue: Queue = undefined;
 
 fn dupeReportTag(allocator: Allocator, old: ReportType) !ReportType {
@@ -90,7 +90,7 @@ const EspHiddDescriptor = extern struct {
 // 2. 166 字节标准 Switch Pro Controller HID 描述符
 // ---------------------------------------------------------------------------
 
-const hid_report_descriptor align(4) = [_]u8{
+var hid_report_descriptor = [_]u8{
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
     0x21, 0x75, 0x08, 0x95, 0x30, 0x81, 0x02, 0x85, 0x30, 0x09, 0x30, 0x75,
     0x08, 0x95, 0x30, 0x81, 0x02, 0x85, 0x31, 0x09, 0x31, 0x75, 0x08, 0x95,
@@ -131,8 +131,8 @@ var g_app_param: sys.esp_hidd_app_param_t = .{
     .description = "Gamepad",
     .provider = "Nintendo",
     .subclass = 0x08,
-    .desc_list = @ptrCast(&g_hid_desc),
-    .desc_list_len = 1,
+    .desc_list = &hid_report_descriptor[0],
+    .desc_list_len = hid_report_descriptor.len,
 };
 var g_in_qos: sys.esp_hidd_qos_param_t = .{
     .service_type = 0x01,
@@ -298,8 +298,6 @@ export fn app_main() callconv(.c) void {
         .deinitValueFn = deinitReportTag,
         .initValueFn = dupeReportTag,
     });
-
-    ControllerProtocol.initFn(&sys.esp_random, &sys.esp_timer_get_time);
 
     idf.nvs.flashInitOrErase() catch |err| {
         log.err("NVS 初始化失败: {s}", .{@errorName(err)});

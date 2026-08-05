@@ -259,7 +259,7 @@ inline fn callHIDDHandler(self: *Self, event: HIDDEvent) void {
 }
 
 pub fn sendReport(self: *Self, data: []u8) !void {
-    log.debug("send report [len={d}]: {x}", .{ data.len, data });
+    log.info("send report [len={d}]: {x}", .{ data.len, data });
     if (data.len <= self.send_report_offset + 1) {
         return BTError.SendWrongReport;
     }
@@ -400,3 +400,12 @@ export fn gapCallback(
         else => {},
     }
 }
+
+pub const panic = mod.idf.esp_panic.panic;
+pub const std_options: std.Options = .{
+    .log_level = switch (builtin.mode) {
+        .Debug => .debug,
+        else => .info,
+    },
+    .logFn = mod.idf.log.espLogFn,
+};

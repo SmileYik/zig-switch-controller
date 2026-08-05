@@ -3,7 +3,7 @@ const mod = @import("root.zig");
 const Allocator = std.mem.Allocator;
 
 const sys = mod.sys;
-const rots = mod.idf.rtos;
+const rtos = mod.idf.rtos;
 
 pub fn Queue(comptime T: type, comptime capacity: usize) type {
     return struct {
@@ -38,14 +38,14 @@ pub fn Queue(comptime T: type, comptime capacity: usize) type {
         allocator: Allocator,
         initValueFn: ?InitFn = null,
         deinitValueFn: ?DeinitFn = null,
-        xqueue: rots.Queue.Handle,
+        xqueue: rtos.Queue.Handle,
 
         pub fn init(opt: Options) !Self {
             if (opt.initValueFn == null and opt.deinitValueFn == null or
                 opt.initValueFn != null and opt.deinitValueFn != null)
             {
                 return .{
-                    .xqueue = (try rots.Queue.create(CAPACITY, @sizeOf(T))),
+                    .xqueue = (try rtos.Queue.create(CAPACITY, @sizeOf(T))),
                     .allocator = opt.allocator,
                     .deinitValueFn = opt.deinitValueFn,
                     .initValueFn = opt.initValueFn,
@@ -65,7 +65,7 @@ pub fn Queue(comptime T: type, comptime capacity: usize) type {
                 opt.initValueFn != null and opt.deinitValueFn != null)
             {
                 return .{
-                    .xqueue = rots.Queue.createStatic(CAPACITY, @sizeOf(T), storage.ptr, buf),
+                    .xqueue = rtos.Queue.createStatic(CAPACITY, @sizeOf(T), storage.ptr, buf),
                     .allocator = opt.allocator,
                     .deinitValueFn = opt.deinitValueFn,
                     .initValueFn = opt.initValueFn,
@@ -78,7 +78,7 @@ pub fn Queue(comptime T: type, comptime capacity: usize) type {
             while (self.pollInner(0)) |v| {
                 self.deinitValue(v);
             }
-            rots.Queue.delete(self.xqueue);
+            rtos.Queue.delete(self.xqueue);
         }
 
         pub fn deinitValue(self: *Self, value: T) void {
@@ -90,13 +90,13 @@ pub fn Queue(comptime T: type, comptime capacity: usize) type {
             try self.enqueueWait(item, 0);
         }
 
-        pub fn enqueueWait(self: *Self, item: T, ticks_to_wait: rots.TickType) !void {
+        pub fn enqueueWait(self: *Self, item: T, ticks_to_wait: rtos.TickType) !void {
             const self_item = if (self.initValueFn) |f|
                 try f(self.allocator, item)
             else
                 item;
 
-            if (!rots.Queue.send(self.xqueue, &self_item, ticks_to_wait)) {
+            if (!rtos.Queue.send(self.xqueue, &self_item, ticks_to_wait)) {
                 if (self.deinitValueFn) |f|
                     f(self.allocator, self_item);
                 return QueueError.Full;
@@ -110,16 +110,16 @@ pub fn Queue(comptime T: type, comptime capacity: usize) type {
                 null;
         }
 
-        pub fn pollWait(self: *Self, ticks_to_wait: rots.TickType) ?Item {
+        pub fn pollWait(self: *Self, ticks_to_wait: rtos.TickType) ?Item {
             return if (self.pollInner(ticks_to_wait)) |value|
                 .{ ._ctx = self, .value = value }
             else
                 null;
         }
 
-        pub fn pollInner(self: *Self, ticks_to_wait: rots.TickType) ?T {
+        pub fn pollInner(self: *Self, ticks_to_wait: rtos.TickType) ?T {
             var item: T = undefined;
-            if (rots.Queue.receive(self.xqueue, &item, ticks_to_wait)) {
+            if (rtos.Queue.receive(self.xqueue, &item, ticks_to_wait)) {
                 return item;
             }
             return null;

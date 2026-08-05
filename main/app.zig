@@ -10,7 +10,6 @@ const bt = mod.bt;
 
 const ControllerProtocol = mod.Protocol;
 const log = std.log.scoped(.switch_controller);
-const ReportQueue = mod.report_queue.ReportQueue(16);
 
 const switch_mac = [_]u8{ 0x7C, 0xBB, 0x8A, 0x77, 0x88, 0x9C };
 var protocol = ControllerProtocol.init(.{
@@ -38,7 +37,7 @@ export fn app_main() callconv(.c) void {
         return;
     };
 
-    var queue = ReportQueue.init(
+    var queue = mod.ReportQueue.init(
         allocator,
         .{ .protocol = protocol },
         .{
@@ -61,7 +60,7 @@ export fn app_main() callconv(.c) void {
 }
 
 export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
-    var q: *ReportQueue = @ptrCast(@alignCast(ctx.?));
+    var q: *mod.ReportQueue = @ptrCast(@alignCast(ctx.?));
     var press_lr_toggle = false;
     while (true) {
         press_lr_toggle = !press_lr_toggle;

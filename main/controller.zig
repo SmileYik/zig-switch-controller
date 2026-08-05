@@ -47,6 +47,29 @@ right_stick_centre: [3]u8 = [_]u8{ 0, 0, 0 },
 left_stick_calibration: StickCalibration,
 right_stick_calibration: StickCalibration,
 
+pub fn packet(self: *Self) mod.report_queue.ReportType {
+    return .{
+        .input = .{
+            .lower = self.button_lower,
+            .shared = self.button_shared,
+            .upper = self.button_upper,
+            .left_stick_centre = self.left_stick_centre,
+            .right_stick_centre = self.right_stick_centre,
+        },
+    };
+}
+
+pub fn setStickCalibration(self: *Self, stick: StickType, calibration: StickCalibration) void {
+    switch (stick) {
+        .left_stick => {
+            self.left_stick_calibration = calibration;
+        },
+        .right_stick => {
+            self.right_stick_calibration = calibration;
+        },
+    }
+}
+
 inline fn calibratedPositionInner(x: f16, y: f16, calibration: StickCalibration) [3]u8 {
     const fx = @as(f16, @floatFromInt(calibration.center_x)) + @abs(x) *
         if (x < 0)

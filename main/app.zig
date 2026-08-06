@@ -51,13 +51,47 @@ export fn app_main() callconv(.c) void {
     defer queue.deinit();
     queue.start() catch @panic("消息队列启动失败!");
 
-    log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
-    _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, queue, 5) catch @panic("Task send_report not created");
+    var controller = mod.Controller.init(.{
+        .report_queue = queue,
+    }) catch |err| {
+        log.err("控制器初始化失败!: {s}", .{@errorName(err)});
+        return;
+    };
+    defer controller.deinit();
 
-    while (true) {
-        idf.rtos.Task.delayMs(1000);
+    log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
+    // _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, queue, 5) catch @panic("Task send_report not created");
+
+    var command_pack_opt = mod.Controller.parseCommand(allocator, SCRIPT) catch |err| {
+        log.err("控制器脚本失败!: {s}", .{@errorName(err)});
+        return;
+    };
+    if (command_pack_opt) |*pack| {
+        defer pack.deinit();
+        controller.runCommandPack(pack);
     }
 }
+
+const SCRIPT =
+    \\REPEAT 4294967294
+    \\
+    \\REPEAT 5
+    \\DOWN R
+    \\DOWN L
+    \\WAIT 0.5s
+    \\UP R
+    \\UP L
+    \\END
+    \\
+    \\REPEAT 4294967294
+    \\DOWN A
+    \\WAIT 0.5s
+    \\UP A
+    \\END
+    \\
+    \\END
+    \\
+;
 
 export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
     var q: *mod.ReportQueue = @ptrCast(@alignCast(ctx.?));

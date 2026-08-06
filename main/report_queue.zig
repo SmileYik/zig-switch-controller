@@ -39,6 +39,8 @@ pub fn ReportQueue(comptime size: usize) type {
         };
 
         running: std.atomic.Value(bool) = .init(false),
+        task_mutex: mod.Mutex,
+
         allocator: Allocator,
         queue: Queue,
         protocol: Protocol,
@@ -48,6 +50,9 @@ pub fn ReportQueue(comptime size: usize) type {
         pub fn init(allocator: Allocator, opt: Options, bt_opt: mod.bt.Options) !*Self {
             const p: *Self = try allocator.create(Self);
             errdefer allocator.destroy(p);
+
+            var mutex: mod.Mutex = try .init();
+            errdefer mutex.deinit();
 
             var queue = opt.queue orelse try Queue.init(.{
                 .allocator = allocator,
@@ -61,6 +66,7 @@ pub fn ReportQueue(comptime size: usize) type {
                 .bt = undefined,
                 .protocol = opt.protocol,
                 .queue = queue,
+                .task_mutex = mutex,
             };
 
             var bt = try mod.bt.init(allocator, p, bt_opt);
@@ -72,7 +78,15 @@ pub fn ReportQueue(comptime size: usize) type {
 
         pub fn deinit(self: *Self) void {
             self.running.store(false, .release);
-            self.queue.enqueueWait(.stop, 60) catch {};
+            while (true) {
+                self.queue.enqueueWait(.stop, mod.sys.pdMS_TO_TICKS(60000)) catch continue;
+                break;
+            }
+
+            self.task_mutex.lockUncancelable();
+            self.task_mutex.unlock();
+            self.task_mutex.deinit();
+
             self.queue.deinit();
             self.allocator.destroy(self);
         }
@@ -114,6 +128,10 @@ pub fn ReportQueue(comptime size: usize) type {
 
         export fn reportTask(ctx: ?*anyopaque) callconv(.c) void {
             var self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.task_mutex.lockUncancelable();
+            defer mod.idf.rtos.Task.delete(null);
+            defer self.task_mutex.unlock();
+
             while (self.running.load(.acquire)) {
                 while (self.queue.pollWait(std.math.maxInt(u32))) |*item| {
                     defer item.deinit();
@@ -160,10 +178,10 @@ pub fn ReportQueue(comptime size: usize) type {
             if (!self.running.load(.acquire)) return;
             switch (event) {
                 .open => {
+                    self.is_connected.store(true, .release);
                     self.enqueue(.{ .incoming = null }) catch |e| {
                         log.err("error when enqueue: {}", .{e});
                     };
-                    self.is_connected.store(true, .release);
                 },
                 .close => {
                     self.is_connected.store(false, .release);

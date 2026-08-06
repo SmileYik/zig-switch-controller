@@ -56,7 +56,7 @@ pub const CommandTag = enum {
     tap,
 };
 pub const Command = union(CommandTag) {
-    stick: struct { stick: StickType, x: f16, y: f16 },
+    stick: struct { stick: StickType, x: f32, y: f32 },
     reset_stick: StickType,
     reset_button,
     reset_all,
@@ -182,7 +182,7 @@ pub fn pressButton(self: *Controller, button: Button, state: ButtonState) void {
     }
 }
 
-pub fn setStick(self: *Controller, stick: StickType, x: f16, y: f16) void {
+pub fn setStick(self: *Controller, stick: StickType, x: f32, y: f32) void {
     self.mutex.lockUncancelable();
     defer self.mutex.unlock();
 
@@ -285,18 +285,18 @@ test "setButtonBit" {
     try ExpectEqual(0xA3, setButtonBit(0xB3, 0x10, .up));
 }
 
-inline fn calibratedPositionInner(x: f16, y: f16, calibration: StickCalibration) [3]u8 {
-    const fx = @as(f16, @floatFromInt(calibration.center_x)) + @abs(x) *
+inline fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
+    const fx = @as(f32, @floatFromInt(calibration.center_x)) + @abs(x) *
         if (x < 0)
-            @as(f16, @floatFromInt(calibration.min_x))
+            @as(f32, @floatFromInt(calibration.min_x))
         else
-            @as(f16, @floatFromInt(calibration.max_x));
+            @as(f32, @floatFromInt(calibration.max_x));
 
-    const fy = @as(f16, @floatFromInt(calibration.center_y)) + @abs(y) *
+    const fy = @as(f32, @floatFromInt(calibration.center_y)) + @abs(y) *
         if (y < 0)
-            @as(f16, @floatFromInt(calibration.min_y))
+            @as(f32, @floatFromInt(calibration.min_y))
         else
-            @as(f16, @floatFromInt(calibration.max_y));
+            @as(f32, @floatFromInt(calibration.max_y));
 
     const ix = @as(i16, @intFromFloat(@round(fx)));
     const iy = @as(i16, @intFromFloat(@round(fy)));
@@ -311,7 +311,7 @@ inline fn calibratedPositionInner(x: f16, y: f16, calibration: StickCalibration)
     };
 }
 
-pub inline fn calibratedPosition(x: f16, y: f16, calibration: StickCalibration) [3]u8 {
+pub inline fn calibratedPosition(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
     return calibratedPositionInner(
         std.math.clamp(x, -1.0, 1.0),
         std.math.clamp(y, -1.0, 1.0),
@@ -530,8 +530,8 @@ pub fn parseCommandLine(script_line: []const u8) !?Command {
             const y_str = iter.next() orelse return error.MissingArgument;
 
             const stick = stringToStick(stick_str) orelse return error.UnknownStick;
-            const x = try std.fmt.parseFloat(f16, x_str);
-            const y = try std.fmt.parseFloat(f16, y_str);
+            const x = try std.fmt.parseFloat(f32, x_str);
+            const y = try std.fmt.parseFloat(f32, y_str);
 
             return Command{ .stick = .{ .stick = stick, .x = x, .y = y } };
         },

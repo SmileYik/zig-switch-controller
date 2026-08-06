@@ -98,7 +98,7 @@ pub const Options = struct {
     right_stick_calibration: StickCalibration = .{},
 
     /// unit is HZ
-    update_rate_hz: u32 = 50,
+    heartbeat_rate_hz: u32 = 50,
     report_queue: *mod.ReportQueue,
 };
 
@@ -112,7 +112,7 @@ left_stick_calibration: StickCalibration,
 right_stick_calibration: StickCalibration,
 
 mutex: Mutex,
-delay_ms: u32,
+heartbeat_delay_tick: u32,
 report_queue: *mod.ReportQueue,
 running: std.atomic.Value(bool) = .init(false),
 task_mutex: Mutex,
@@ -127,7 +127,7 @@ pub fn init(opt: Options) !Controller {
         .mutex = mutex,
         .task_mutex = task_mutex,
         .report_queue = opt.report_queue,
-        .delay_ms = @trunc(@as(f32, @round(1000.0 / @as(f32, @floatFromInt(opt.update_rate_hz))))),
+        .heartbeat_delay_tick = mod.idf.rtos.msToTicks(@trunc(@as(f32, @round(1000.0 / @as(f32, @floatFromInt(opt.heartbeat_rate_hz)))))),
         .left_stick_calibration = opt.left_stick_calibration,
         .right_stick_calibration = opt.right_stick_calibration,
     };
@@ -142,10 +142,7 @@ pub fn deinit(self: *Controller) void {
     self.mutex.deinit();
 }
 
-pub fn packet(self: *Controller) mod.report_queue.ReportType {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
+inline fn packetUnlocked(self: *Controller) mod.report_queue.ReportType {
     return .{
         .input = .{
             .lower = self.button_lower,
@@ -155,6 +152,13 @@ pub fn packet(self: *Controller) mod.report_queue.ReportType {
             .right_stick_centre = self.right_stick_centre,
         },
     };
+}
+
+pub fn packet(self: *Controller) mod.report_queue.ReportType {
+    self.mutex.lockUncancelable();
+    defer self.mutex.unlock();
+
+    return self.packetUnlocked();
 }
 
 pub fn setStickCalibration(self: *Controller, stick: StickType, calibration: StickCalibration) void {
@@ -180,6 +184,21 @@ pub fn pressButton(self: *Controller, button: Button, state: ButtonState) void {
         .shared => |mask| self.button_shared = setButtonBit(self.button_shared, @intFromEnum(mask), state),
         .upper => |mask| self.button_upper = setButtonBit(self.button_upper, @intFromEnum(mask), state),
     }
+
+    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
+        log.err("failed to send press button report: {s}", .{@errorName(err)});
+    };
+
+    log.info(
+        "set button [{}] to [{}]. [lower, shared, upper] = [{x}, {x}, {x}]",
+        .{
+            button,
+            state,
+            self.button_lower,
+            self.button_shared,
+            self.button_upper,
+        },
+    );
 }
 
 pub fn setStick(self: *Controller, stick: StickType, x: f32, y: f32) void {
@@ -190,6 +209,10 @@ pub fn setStick(self: *Controller, stick: StickType, x: f32, y: f32) void {
         .left_stick => self.left_stick_centre = calibratedPosition(x, y, self.left_stick_calibration),
         .right_stick => self.right_stick_centre = calibratedPosition(x, y, self.right_stick_calibration),
     }
+
+    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
+        log.err("failed to send stick report: {s}", .{@errorName(err)});
+    };
 }
 
 pub fn resetStick(self: *Controller, stick: StickType) void {
@@ -200,6 +223,10 @@ pub fn resetStick(self: *Controller, stick: StickType) void {
         .left_stick => @memset(&self.left_stick_centre, 0),
         .right_stick => @memset(&self.right_stick_centre, 0),
     }
+
+    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
+        log.err("failed to reset stick report: {s}", .{@errorName(err)});
+    };
 }
 
 pub fn resetButton(self: *Controller) void {
@@ -209,6 +236,10 @@ pub fn resetButton(self: *Controller) void {
     self.button_lower = 0;
     self.button_shared = 0;
     self.button_upper = 0;
+
+    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
+        log.err("failed to send reset button report: {s}", .{@errorName(err)});
+    };
 }
 
 pub fn start(self: *Controller) !void {
@@ -229,15 +260,17 @@ export fn task(ctx: ?*anyopaque) callconv(.c) void {
     defer mod.idf.rtos.Task.delete(null);
 
     while (self.running.load(.acquire)) {
-        const report = self.packet();
+        // heartbeat packet
+        const report: mod.report_queue.ReportType = .{ .incoming = null };
         self.report_queue.enqueue(report) catch |err| {
-            log.err("failed to send report: {s}", .{@errorName(err)});
+            log.err("failed to send heartbeat report: {s}", .{@errorName(err)});
         };
-        mod.idf.rtos.Task.delayMs(self.delay_ms);
+        mod.idf.rtos.Task.delay(self.heartbeat_delay_tick);
     }
 }
 
 pub inline fn runCommand(self: *Controller, command: *const Command) void {
+    // log.info("run command {}", .{std.meta.activeTag(command.*)});
     switch (command.*) {
         .down => |b| self.pressButton(b, .down),
         .up => |b| self.pressButton(b, .up),
@@ -612,11 +645,11 @@ pub fn appendCommand(
 ) !void {
     switch (command) {
         .tap => |t| {
-            try appendCommand(allocator, list, .{ .down = t.button });
             if (t.duration > 0) {
+                try appendCommand(allocator, list, .{ .down = t.button });
                 try appendCommand(allocator, list, .{ .wait = t.duration });
+                try appendCommand(allocator, list, .{ .up = t.button });
             }
-            try appendCommand(allocator, list, .{ .up = t.button });
         },
         .up => |btn| {
             _ = eraseTailSameCommand(list, command);

@@ -9,7 +9,6 @@ const log = std.log.scoped(.report_queue);
 pub const ReportTag = enum {
     incoming,
     sending,
-    press_button,
     input,
     stop,
 };
@@ -17,7 +16,6 @@ pub const ReportTag = enum {
 pub const ReportType = union(ReportTag) {
     incoming: ?[]u8,
     sending: []u8,
-    press_button: struct { upper: u8, shared: u8, lower: u8 },
     input: struct {
         upper: u8 = 0,
         shared: u8 = 0,
@@ -46,6 +44,7 @@ pub fn ReportQueue(comptime size: usize) type {
         protocol: Protocol,
         bt: *mod.bt,
         is_connected: std.atomic.Value(bool) = .init(false),
+        snapshot_input: ReportType = .{ .input = .{} },
 
         pub fn init(allocator: Allocator, opt: Options, bt_opt: mod.bt.Options) !*Self {
             const p: *Self = try allocator.create(Self);
@@ -86,6 +85,7 @@ pub fn ReportQueue(comptime size: usize) type {
             self.task_mutex.lockUncancelable();
             self.task_mutex.unlock();
             self.task_mutex.deinit();
+            self.bt.deinit();
 
             self.queue.deinit();
             self.allocator.destroy(self);
@@ -98,7 +98,7 @@ pub fn ReportQueue(comptime size: usize) type {
                 "report_task",
                 1024 * 8,
                 self,
-                5,
+                1,
             );
         }
 
@@ -126,13 +126,27 @@ pub fn ReportQueue(comptime size: usize) type {
             }
         }
 
+        inline fn handleInputSnapshot(self: *Self, report: ?ReportType) void {
+            if (self.snapshot_input == .input) {
+                const s = self.snapshot_input.input;
+                self.protocol.setButtonInputs(s.upper, s.shared, s.lower);
+                self.protocol.setLeftStickInputs(s.left_stick_centre);
+                self.protocol.setRightStickInputs(s.right_stick_centre);
+            }
+            if (report) |r| switch (r) {
+                .input => |s| {
+                    self.snapshot_input = .{ .input = s };
+                },
+            };
+        }
+
         export fn reportTask(ctx: ?*anyopaque) callconv(.c) void {
             var self: *Self = @ptrCast(@alignCast(ctx.?));
             self.task_mutex.lockUncancelable();
             defer mod.idf.rtos.Task.delete(null);
             defer self.task_mutex.unlock();
 
-            while (self.running.load(.acquire)) {
+            while (true) {
                 while (self.queue.pollWait(std.math.maxInt(u32))) |*item| {
                     defer item.deinit();
 
@@ -144,6 +158,7 @@ pub fn ReportQueue(comptime size: usize) type {
                     switch (item.value) {
                         .incoming => |s| {
                             self.protocol.processCommands(s orelse &[_]u8{});
+                            self.handleInputSnapshot(null);
                             defer self.protocol.clearReport();
                             self.bt.sendReport(self.protocol.report[0..]) catch {};
                         },
@@ -152,18 +167,12 @@ pub fn ReportQueue(comptime size: usize) type {
                             self.bt.sendReport(s) catch {};
                         },
 
-                        .press_button => |s| {
-                            self.protocol.setFullInputReport();
-                            self.protocol.setButtonInputs(s.upper, s.shared, s.lower);
-                            defer self.protocol.clearReport();
-                            self.bt.sendReport(self.protocol.report[0..]) catch {};
-                        },
-
                         .input => |s| {
                             self.protocol.setFullInputReport();
                             self.protocol.setButtonInputs(s.upper, s.shared, s.lower);
                             self.protocol.setLeftStickInputs(s.left_stick_centre);
                             self.protocol.setRightStickInputs(s.right_stick_centre);
+                            self.snapshot_input = .{ .input = s };
                             defer self.protocol.clearReport();
                             self.bt.sendReport(self.protocol.report[0..]) catch {};
                         },

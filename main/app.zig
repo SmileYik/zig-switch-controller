@@ -53,14 +53,23 @@ export fn app_main() callconv(.c) void {
 
     var controller = mod.Controller.init(.{
         .report_queue = queue,
+        .heartbeat_rate_hz = 2,
     }) catch |err| {
         log.err("控制器初始化失败!: {s}", .{@errorName(err)});
         return;
     };
     defer controller.deinit();
+    controller.start() catch |err| {
+        log.err("控制器启动失败!: {s}", .{@errorName(err)});
+        return;
+    };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
     // _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, queue, 5) catch @panic("Task send_report not created");
+
+    while (!queue.is_connected.load(.acquire)) {
+        idf.rtos.Task.delayMs(1000);
+    }
 
     var command_pack_opt = mod.Controller.parseCommand(allocator, SCRIPT) catch |err| {
         log.err("控制器脚本失败!: {s}", .{@errorName(err)});
@@ -75,41 +84,182 @@ export fn app_main() callconv(.c) void {
 const SCRIPT =
     \\REPEAT 4294967294
     \\
-    \\REPEAT 5
-    \\DOWN R
-    \\DOWN L
-    \\WAIT 0.5s
-    \\UP R
-    \\UP L
-    \\END
+    \\  REPEAT 5
+    \\    DOWN R
+    \\    DOWN L
+    \\    WAIT 66ms
+    \\    UP R
+    \\    UP L
+    \\    WAIT 66ms
+    \\  END
     \\
-    \\REPEAT 4294967294
-    \\DOWN A
-    \\WAIT 0.5s
-    \\UP A
+    \\  WAIT 10s
+    \\
+    \\  REPEAT 1
+    \\    DOWN A
+    \\    WAIT 66ms
+    \\    UP A
+    \\    WAIT 66ms
+    \\  END
+    \\
+    \\  WAIT 20s
+    \\
+    \\REPEAT 3
+    \\  DOWN ZR
+    \\  WAIT 66ms
+    \\  UP ZR
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN R
+    \\  WAIT 66ms
+    \\  UP R
+    \\END
+    \\WAIT 1s
+    \\
+    // \\REPEAT 3
+    // \\  DOWN JCL_SL
+    // \\  WAIT 66ms
+    // \\  UP JCL_SL
+    // \\END
+    // \\WAIT 1s
+    // \\
+    // \\REPEAT 3
+    // \\  DOWN JCL_SR
+    // \\  WAIT 66ms
+    // \\  UP JCL_SR
+    // \\END
+    // \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN A
+    \\  WAIT 66ms
+    \\  UP A
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN B
+    \\  WAIT 66ms
+    \\  UP B
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN X
+    \\  WAIT 66ms
+    \\  UP X
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN Y
+    \\  WAIT 66ms
+    \\  UP Y
+    \\END
+    \\WAIT 1s
+    \\
+    // \\REPEAT 3
+    // \\  DOWN CAPTURE
+    // \\  WAIT 66ms
+    // \\  UP CAPTURE
+    // \\END
+    // \\WAIT 1s
+    \\
+    // \\REPEAT 3
+    // \\  DOWN HOME
+    // \\  WAIT 66ms
+    // \\  UP HOME
+    // \\END
+    // \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN L_STICK_PRESSED
+    \\  WAIT 66ms
+    \\  UP L_STICK_PRESSED
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN R_STICK_PRESSED
+    \\  WAIT 66ms
+    \\  UP R_STICK_PRESSED
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN PLUS
+    \\  WAIT 66ms
+    \\  UP PLUS
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN MINUS
+    \\  WAIT 66ms
+    \\  UP MINUS
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN ZL
+    \\  WAIT 66ms
+    \\  UP ZL
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN L
+    \\  WAIT 66ms
+    \\  UP L
+    \\END
+    \\WAIT 1s
+    \\
+    // \\REPEAT 3
+    // \\  DOWN JCR_SL
+    // \\  WAIT 66ms
+    // \\  UP JCR_SL
+    // \\END
+    // \\WAIT 1s
+    // \\
+    // \\REPEAT 3
+    // \\  DOWN JCR_SR
+    // \\  WAIT 66ms
+    // \\  UP JCR_SR
+    // \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN DPAD_LEFT
+    \\  WAIT 66ms
+    \\  UP DPAD_LEFT
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN DPAD_RIGHT
+    \\  WAIT 66ms
+    \\  UP DPAD_RIGHT
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN DPAD_UP
+    \\  WAIT 66ms
+    \\  UP DPAD_UP
+    \\END
+    \\WAIT 1s
+    \\
+    \\REPEAT 3
+    \\  DOWN DPAD_DOWN
+    \\  WAIT 66ms
+    \\  UP DPAD_DOWN
     \\END
     \\
     \\END
     \\
 ;
-
-export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
-    var q: *mod.ReportQueue = @ptrCast(@alignCast(ctx.?));
-    var press_lr_toggle = false;
-    while (true) {
-        press_lr_toggle = !press_lr_toggle;
-
-        q.enqueue(.{
-            .press_button = .{
-                .lower = if (press_lr_toggle) ControllerProtocol.combine(.{ControllerProtocol.ButtonLower.L}) else 0,
-                .shared = 0,
-                .upper = if (press_lr_toggle) ControllerProtocol.combine(.{ControllerProtocol.ButtonUpper.R}) else 0,
-            },
-        }) catch {};
-
-        idf.rtos.Task.delayMs(66);
-    }
-}
 
 pub const panic = idf.esp_panic.panic;
 pub const std_options: std.Options = .{

@@ -50,34 +50,36 @@ pub const SwitchResponse = enum(i16) {
 };
 
 pub const ButtonUpper = enum(u8) {
-    ZR = 0x01,
-    R = 0x02,
-    JCC_SL = 0x04,
-    JCL_SR = 0x08,
-    A = 0x10,
-    B = 0x20,
-    X = 0x40,
-    Y = 0x80,
+    ZR = 1 << 7,
+    R = 1 << 6,
+    JCL_SL = 1 << 5,
+    JCL_SR = 1 << 4,
+    A = 1 << 3,
+    B = 1 << 2,
+    X = 1 << 1,
+    Y = 1 << 0,
 };
 
 pub const ButtonShared = enum(u8) {
-    CAPTURE = 0x01,
-    HOME = 0x02,
-    L_STICK_PRESSED = 0x04,
-    R_STICK_PRESSED = 0x08,
-    PLUS = 0x10,
-    MINUS = 0x20,
+    PLUS = 1 << 0,
+    MINUS = 1 << 1,
+    R_STICK_PRESSED = 1 << 2,
+    L_STICK_PRESSED = 1 << 3,
+    HOME = 1 << 4,
+    CAPTURE = 1 << 5,
+    // bit6         = 1 << 6 未使用
+    // bit7         = 1 << 7 未使用
 };
 
 pub const ButtonLower = enum(u8) {
-    ZL = 0x01,
-    L = 0x02,
-    JCR_SL = 0x04,
-    JCR_SR = 0x08,
-    DPAD_LEFT = 0x10,
-    DPAD_RIGHT = 0x20,
-    DPAD_UP = 0x40,
-    DPAD_DOWN = 0x80,
+    ZL = 1 << 7,
+    L = 1 << 6,
+    JCR_SL = 1 << 5,
+    JCR_SR = 1 << 4,
+    DPAD_LEFT = 1 << 3,
+    DPAD_RIGHT = 1 << 2,
+    DPAD_UP = 1 << 1,
+    DPAD_DOWN = 1 << 0,
 };
 
 /// 输入报告模式

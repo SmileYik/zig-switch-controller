@@ -31,44 +31,48 @@ pub const CommandTimeUnit = enum {
     m,
     h,
 };
-pub const CommandTag = enum {
-    /// STICK stick_type x y
-    stick,
-    /// RESET_STICK stick_type
-    reset_stick,
-    /// RESET_BUTTON
-    reset_button,
-    /// RESET_ALL
-    reset_all,
-    /// WAIT time_num{unit}
-    wait,
+pub const CommandTag = enum(u8) {
+    end = 0,
     /// UP button
-    up,
+    up = 1,
     /// DOWN button
-    down,
-    /// REPEAT times {
-    ///     COMMANDS
-    /// }
-    repeat,
-    /// Other commands
-    commands,
-    end,
+    down = 2,
     /// TAP button time_num{unit}
-    tap,
+    tap = 3,
+    /// STICK stick_type x y
+    stick = 4,
+    /// RESET_STICK stick_type
+    reset_stick = 11,
+    /// RESET_BUTTON
+    reset_button = 12,
+    /// RESET_ALL
+    reset_all = 13,
+    /// WAIT time_num{unit}
+    wait = 21,
+    /// REPEAT times
+    ///     COMMANDS
+    /// END
+    repeat = 31,
+    /// Other commands
+    commands = 41,
+};
+pub const CombinedButton = struct {
+    button: Button,
+    combine: bool = false,
 };
 pub const Command = union(CommandTag) {
+    end,
+    up: CombinedButton,
+    down: CombinedButton,
+    tap: struct { button: CombinedButton, duration: u32 },
     stick: struct { stick: StickType, x: f32, y: f32 },
     reset_stick: StickType,
     reset_button,
     reset_all,
     /// unit: milliseconds
     wait: u32,
-    up: Button,
-    down: Button,
     repeat: struct { times: u32, commands: Commands },
     commands: Commands,
-    end,
-    tap: struct { button: Button, duration: u32 },
 };
 pub const Commands = std.ArrayList(Command);
 pub const CommandPack = struct {
@@ -176,7 +180,7 @@ pub fn setStickCalibration(self: *Controller, stick: StickType, calibration: Sti
     }
 }
 
-pub fn pressButton(self: *Controller, button: Button, state: ButtonState) void {
+pub fn pressButton(self: *Controller, button: Button, state: ButtonState, combine: bool) void {
     self.mutex.lockUncancelable();
     defer self.mutex.unlock();
 
@@ -186,20 +190,22 @@ pub fn pressButton(self: *Controller, button: Button, state: ButtonState) void {
         .upper => |mask| self.button_upper = setButtonBit(self.button_upper, @intFromEnum(mask), state),
     }
 
-    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
-        log.err("failed to send press button report: {s}", .{@errorName(err)});
-    };
-
     log.info(
-        "set button [{}] to [{}]. [lower, shared, upper] = [{x}, {x}, {x}]",
+        "set button [{}] to [{}]. combine = [{}], [lower, shared, upper] = [{x}, {x}, {x}]",
         .{
             button,
             state,
+            combine,
             self.button_lower,
             self.button_shared,
             self.button_upper,
         },
     );
+
+    if (!combine)
+        self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
+            log.err("failed to send press button report: {s}", .{@errorName(err)});
+        };
 }
 
 pub fn setStick(self: *Controller, stick: StickType, x: f32, y: f32) void {
@@ -273,8 +279,8 @@ export fn task(ctx: ?*anyopaque) callconv(.c) void {
 pub inline fn runCommand(self: *Controller, command: *const Command) void {
     // log.info("run command {}", .{std.meta.activeTag(command.*)});
     switch (command.*) {
-        .down => |b| self.pressButton(b, .down),
-        .up => |b| self.pressButton(b, .up),
+        .down => |b| self.pressButton(b.button, .down, b.combine),
+        .up => |b| self.pressButton(b.button, .up, b.combine),
         .reset_all => {
             self.resetButton();
             self.resetStick(.left_stick);
@@ -525,38 +531,81 @@ fn deinitCommand(allocator: std.mem.Allocator, command: *Command) void {
     }
 }
 
-pub fn parseCommandLine(script_line: []const u8) !?Command {
+pub fn parseCommandButtons(allocator: std.mem.Allocator, iter: anytype) !std.ArrayList(Button) {
+    var buttons: std.ArrayList(Button) = try std.ArrayList(Button).initCapacity(allocator, 4);
+    errdefer buttons.deinit(allocator);
+    while (iter.next()) |str| {
+        const btn = stringToButton(str) orelse return error.UnknownButton;
+        try buttons.append(allocator, btn);
+    }
+    if (buttons.items.len == 0) return error.MissingArgument;
+    return buttons;
+}
+
+pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !?Commands {
     const trimmed = std.mem.trim(u8, script_line, " \t\r\n");
     if (trimmed.len == 0 or trimmed[0] == '#') return null;
 
     var iter = std.mem.tokenizeAny(u8, trimmed, " \t");
     const cmd_str = iter.next() orelse return null;
 
+    var commands = try Commands.initCapacity(allocator, 4);
+    errdefer commands.deinit(allocator);
+
     const tag = lowerStringToEnum(CommandTag, cmd_str) orelse return error.UnknownCommand;
-    return switch (tag) {
+    switch (tag) {
         .wait => {
             const time_str = iter.next() orelse return error.MissingArgument;
             const ms = try parseTimeString(time_str);
-            return Command{ .wait = ms };
+            try commands.append(allocator, Command{ .wait = ms });
         },
         .down => {
-            const btn_str = iter.next() orelse return error.MissingArgument;
-            const btn = stringToButton(btn_str) orelse return error.UnknownButton;
-            return Command{ .down = btn };
+            var buttons: std.ArrayList(Button) = try parseCommandButtons(allocator, &iter);
+            defer buttons.deinit(allocator);
+
+            var items = try commands.addManyAsSlice(allocator, buttons.items.len);
+            for (buttons.items, 0..) |btn, i| {
+                const combined = i + 1 < buttons.items.len;
+                items[i] = .{
+                    .down = .{ .button = btn, .combine = combined },
+                };
+            }
         },
         .up => {
-            const btn_str = iter.next() orelse return error.MissingArgument;
-            const btn = stringToButton(btn_str) orelse return error.UnknownButton;
-            return Command{ .up = btn };
+            var buttons: std.ArrayList(Button) = try parseCommandButtons(allocator, &iter);
+            defer buttons.deinit(allocator);
+
+            var items = try commands.addManyAsSlice(allocator, buttons.items.len);
+            for (buttons.items, 0..) |btn, i| {
+                const combined = i + 1 < buttons.items.len;
+                items[i] = .{
+                    .up = .{ .button = btn, .combine = combined },
+                };
+            }
         },
         .tap => {
-            const btn_str = iter.next() orelse return error.MissingArgument;
-            const btn = stringToButton(btn_str) orelse return error.UnknownButton;
             const duration = if (iter.next()) |time_str|
                 try parseTimeString(time_str)
             else
-                50;
-            return Command{ .tap = .{ .button = btn, .duration = duration } };
+                return error.MissingArgument;
+
+            var buttons: std.ArrayList(Button) = try parseCommandButtons(allocator, &iter);
+            defer buttons.deinit(allocator);
+
+            var items = try commands.addManyAsSlice(allocator, buttons.items.len * 2 + 1);
+            var downs = items[0..buttons.items.len];
+            items[buttons.items.len] = .{ .wait = duration };
+            var ups = items[buttons.items.len + 1 ..];
+
+            for (buttons.items, 0..) |btn, i| {
+                const combined = i + 1 < buttons.items.len;
+                downs[i] = .{
+                    .down = .{ .button = btn, .combine = combined },
+                };
+                ups[i] = .{
+                    .up = .{ .button = btn, .combine = combined },
+                };
+            }
         },
         .stick => {
             const stick_str = iter.next() orelse return error.MissingArgument;
@@ -567,64 +616,27 @@ pub fn parseCommandLine(script_line: []const u8) !?Command {
             const x = try std.fmt.parseFloat(f32, x_str);
             const y = try std.fmt.parseFloat(f32, y_str);
 
-            return Command{ .stick = .{ .stick = stick, .x = x, .y = y } };
+            try commands.append(allocator, Command{ .stick = .{ .stick = stick, .x = x, .y = y } });
         },
         .reset_stick => {
-            if (iter.next()) |stick_str| {
-                const stick = stringToStick(stick_str) orelse return error.UnknownStick;
-                return Command{ .reset_stick = stick };
-            }
-            // 若没填参数可返回默认值或单独处理
-            return Command{ .reset_stick = .left_stick };
+            const stick_str = iter.next() orelse return error.MissingArgument;
+            const stick = stringToStick(stick_str) orelse return error.UnknownStick;
+            try commands.append(allocator, Command{ .reset_stick = stick });
         },
         .repeat => {
             const times_str = iter.next() orelse return error.MissingArgument;
             const times = try std.fmt.parseInt(u32, times_str, 10);
-            return Command{ .repeat = .{ .times = times, .commands = undefined } };
+            try commands.append(allocator, Command{ .repeat = .{ .times = times, .commands = undefined } });
         },
-        .end => .end,
-        .reset_button => .reset_button,
-        .reset_all => .reset_all,
-        else => null,
-    };
+        .end => {
+            try commands.append(allocator, .end);
+        },
+        .reset_button => try commands.append(allocator, .reset_button),
+        .reset_all => try commands.append(allocator, .reset_all),
+        else => return null,
+    }
+    return commands;
 }
-
-// pub fn flatCommand(allocator: std.mem.Allocator, command: Command) ?Command {
-//     switch (command) {
-//         .commands => |inner| {
-//             return flatCommands(allocator, inner);
-//         },
-//         .repeat => |inner_command| {
-//             if (flatCommand(allocator, inner_command.command)) |simplified| {
-//                 return if (simplified == .repeat)
-//                     .{ .repeat = .{ .times = inner_command.times * simplified.repeat.times, .command = simplified.repeat.command } }
-//                 else
-//                     .{ .repeat = .{ .times = inner_command.times, .command = simplified } };
-//             }
-//             return null;
-//         },
-
-//         else => return command,
-//     }
-// }
-
-// test "flatCommand 1" {
-//     const command: Command = .{ .repeat = .{ .times = 1, .command = .{ .down = .{ .lower = .DPAD_DOWN } } } };
-//     try ExpectEqual(command, flatCommand(testing.allocator, command));
-// }
-
-// pub fn flatCommands(allocator: std.mem.Allocator, commands: Commands) ?Command {
-//     if (commands.items.len == 0) return null;
-//     if (commands.items.len == 1) {
-//         defer commands.deinit(allocator);
-
-//         const command = commands.items[0];
-//         return flatCommand(allocator, command);
-//     }
-//     return .{ .commands = commands };
-// }
-
-// test "flat" {}
 
 inline fn eraseTailSameCommand(
     commands: *Commands,
@@ -645,38 +657,8 @@ pub fn appendCommand(
     command: Command,
 ) !void {
     switch (command) {
-        .tap => |t| {
-            if (t.duration > 0) {
-                try appendCommand(allocator, list, .{ .down = t.button });
-                try appendCommand(allocator, list, .{ .wait = t.duration });
-                try appendCommand(allocator, list, .{ .up = t.button });
-            }
-        },
-        .up => |btn| {
-            _ = eraseTailSameCommand(list, command);
-            if (!eraseTailSameCommand(list, .{ .down = btn })) {
-                try list.append(allocator, command);
-            }
-        },
-        .down => |btn| {
-            var flag = true;
-            while (flag) {
-                const a = eraseTailSameCommand(list, command);
-                const b = eraseTailSameCommand(list, .{ .up = btn });
-                flag = a or b;
-            }
-            try list.append(allocator, command);
-        },
         .reset_all, .reset_button, .reset_stick => {
             _ = eraseTailSameCommand(list, command);
-            try list.append(allocator, command);
-        },
-        .stick => {
-            while (list.getLastOrNull()) |last| {
-                if (last == .stick and last.stick.stick == command.stick.stick) {
-                    _ = list.pop();
-                } else break;
-            }
             try list.append(allocator, command);
         },
         .wait => |ms| {
@@ -701,30 +683,34 @@ pub fn parseCommandBlock(allocator: std.mem.Allocator, lines: anytype) !?Command
     var list = try Commands.initCapacity(allocator, 16);
     errdefer deinitCommands(allocator, &list);
 
-    while (lines.next()) |line| {
-        if (try parseCommandLine(line)) |command|
-            switch (command) {
-                .end => break,
-                .repeat => |s| {
-                    var opt = try parseCommandBlock(allocator, lines);
-                    if (opt) |*inner_list| {
-                        errdefer deinitCommands(allocator, inner_list);
+    stop_lines: while (lines.next()) |line| {
+        var commands_opt = try parseCommandLine(allocator, line);
+        if (commands_opt) |*commands| {
+            defer commands.deinit(allocator);
 
-                        try list.append(allocator, .{
-                            .repeat = .{
-                                .commands = inner_list.*,
-                                .times = s.times,
-                            },
-                        });
-                    }
-                },
-                else => {
-                    try appendCommand(allocator, &list, command);
-                },
-            };
+            for (commands.items) |command|
+                switch (command) {
+                    .end => break :stop_lines,
+                    .repeat => |s| {
+                        var opt = try parseCommandBlock(allocator, lines);
+                        if (opt) |*inner_list| {
+                            errdefer deinitCommands(allocator, inner_list);
+
+                            try list.append(allocator, .{
+                                .repeat = .{
+                                    .commands = inner_list.*,
+                                    .times = s.times,
+                                },
+                            });
+                        }
+                    },
+                    else => {
+                        try appendCommand(allocator, &list, command);
+                    },
+                };
+        }
     }
 
-    try list.shrinkToLen(allocator);
     return list;
 }
 

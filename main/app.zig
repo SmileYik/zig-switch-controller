@@ -85,11 +85,9 @@ const SCRIPT =
     \\REPEAT 4294967294
     \\
     \\  REPEAT 5
-    \\    DOWN R
-    \\    DOWN L
+    \\    DOWN R L
     \\    WAIT 66ms
-    \\    UP R
-    \\    UP L
+    \\    UP R L
     \\    WAIT 66ms
     \\  END
     \\

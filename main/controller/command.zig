@@ -25,25 +25,32 @@ pub const CommandTag = enum(u8) {
     tap = 3,
     /// STICK stick_type x y
     stick = 4,
+
     up_combine = 5,
     /// DOWN button
     down_combine = 6,
     /// TAP button time_num{unit}
     tap_combine = 7,
+
     /// RESET_STICK stick_type
-    reset_stick = 11,
+    reset_stick = 21,
     /// RESET_BUTTON
-    reset_button = 12,
+    reset_button = 22,
     /// RESET_ALL
-    reset_all = 13,
+    reset_all = 23,
+
     /// WAIT time_num{unit}
-    wait = 21,
+    wait = 41,
+    wait_u8 = 42,
+    wait_u16 = 43,
+
     /// REPEAT times
     ///     COMMANDS
     /// END
-    repeat = 31,
+    repeat = 61,
+
     /// Other commands
-    commands = 41,
+    commands = 81,
 };
 
 pub const CombinedButton = struct {
@@ -65,6 +72,8 @@ pub const Command = union(CommandTag) {
     reset_all,
     /// unit: milliseconds
     wait: u32,
+    wait_u8: u8,
+    wait_u16: u16,
     repeat: struct { times: u32, commands: Commands },
     commands: Commands,
 };

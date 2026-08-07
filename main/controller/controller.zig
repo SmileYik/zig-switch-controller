@@ -231,6 +231,8 @@ pub inline fn runCommand(self: *Controller, command: *const mod.command.Command)
         .reset_stick => |stick| self.resetStick(stick),
         .stick => |stick| self.setStick(stick.stick, stick.x, stick.y),
         .wait => |ms| self.handler.sleep(ms),
+        .wait_u16 => |ms| self.handler.sleep(@intCast(ms)),
+        .wait_u8 => |ms| self.handler.sleep(@intCast(ms)),
         .commands => |*cs| self.runCommands(cs),
         .repeat => |*repeat| {
             for (0..repeat.times) |_| {

@@ -169,6 +169,22 @@ pub fn parseCommandButtons(allocator: std.mem.Allocator, iter: anytype) !Buttons
     return buttons;
 }
 
+inline fn appendWaitCommand(
+    allocator: std.mem.Allocator,
+    commands: *Commands,
+    ms: u32,
+) !void {
+    if (ms == 0) return;
+
+    if (ms <= std.math.maxInt(u8)) {
+        try commands.append(allocator, Command{ .wait_u8 = @intCast(ms) });
+    } else if (ms <= std.math.maxInt(u16)) {
+        try commands.append(allocator, Command{ .wait_u16 = @intCast(ms) });
+    } else {
+        try commands.append(allocator, Command{ .wait = ms });
+    }
+}
+
 pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !?Commands {
     const trimmed = std.mem.trim(u8, script_line, " \t\r\n");
     if (trimmed.len == 0 or trimmed[0] == '#') return null;
@@ -181,10 +197,10 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
 
     const tag = lowerStringToEnum(CommandTag, cmd_str) orelse return error.UnknownCommand;
     switch (tag) {
-        .wait => {
+        .wait, .wait_u8, .wait_u16 => {
             const time_str = iter.next() orelse return error.MissingArgument;
             const ms = try parseTimeString(time_str);
-            try commands.append(allocator, Command{ .wait = ms });
+            try appendWaitCommand(allocator, &commands, ms);
         },
         .down, .down_combine => {
             var buttons = try parseCommandButtons(allocator, &iter);
@@ -281,6 +297,53 @@ inline fn eraseTailSameCommand(
     return len != commands.items.len;
 }
 
+inline fn safeAppendCombineTime(
+    allocator: std.mem.Allocator,
+    commands: *Commands,
+    total_ms: u32,
+    ms: u32,
+) !u32 {
+    return std.math.add(u32, total_ms, ms) catch {
+        try commands.append(allocator, .{ .wait = std.math.maxInt(u32) });
+        return total_ms +% ms;
+    };
+}
+
+inline fn combineTailWaitTime(
+    allocator: std.mem.Allocator,
+    commands: *Commands,
+    current_ms: u32,
+) !void {
+    var total_ms: u32 = current_ms;
+
+    var new_list = try Commands.initCapacity(allocator, 2);
+    defer new_list.deinit(allocator);
+
+    while (commands.getLastOrNull()) |last| {
+        switch (last) {
+            .wait => |ms| {
+                total_ms = try safeAppendCombineTime(allocator, &new_list, total_ms, ms);
+                _ = commands.pop();
+            },
+            .wait_u16 => |ms_u| {
+                const ms = @as(u32, @intCast(ms_u));
+                total_ms = try safeAppendCombineTime(allocator, &new_list, total_ms, ms);
+                _ = commands.pop();
+            },
+            .wait_u8 => |ms_u| {
+                const ms = @as(u32, @intCast(ms_u));
+                total_ms = try safeAppendCombineTime(allocator, &new_list, total_ms, ms);
+                _ = commands.pop();
+            },
+            else => break,
+        }
+    }
+    for (new_list.items) |c| {
+        try commands.append(allocator, c);
+    }
+    try appendWaitCommand(allocator, commands, total_ms);
+}
+
 pub fn appendCommand(
     allocator: std.mem.Allocator,
     list: *Commands,
@@ -292,16 +355,13 @@ pub fn appendCommand(
             try list.append(allocator, command);
         },
         .wait => |ms| {
-            var need_append = true;
-            if (list.getLastOrNull()) |last| {
-                if (last == .wait) {
-                    list.items[list.items.len - 1] = .{ .wait = ms + last.wait };
-                    need_append = false;
-                }
-            }
-            if (need_append) {
-                try list.append(allocator, command);
-            }
+            try combineTailWaitTime(allocator, list, ms);
+        },
+        .wait_u16 => |ms| {
+            try combineTailWaitTime(allocator, list, @as(u32, @intCast(ms)));
+        },
+        .wait_u8 => |ms| {
+            try combineTailWaitTime(allocator, list, @as(u32, @intCast(ms)));
         },
         else => {
             try list.append(allocator, command);

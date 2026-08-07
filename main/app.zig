@@ -85,7 +85,7 @@ export fn app_main() callconv(.c) void {
         idf.rtos.Task.delayMs(1000);
     }
 
-    var command_pack_opt = mod.controller.command.parseCommand(allocator, SCRIPT) catch |err| {
+    var command_pack_opt = mod.controller.command.parser.parseCommand(allocator, SCRIPT) catch |err| {
         log.err("控制器脚本失败!: {s}", .{@errorName(err)});
         return;
     };

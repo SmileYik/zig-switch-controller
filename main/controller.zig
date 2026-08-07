@@ -2,10 +2,11 @@ const std = @import("std");
 const mod = @import("root.zig");
 const Mutex = mod.Mutex;
 
-const Protocol = mod.Protocol;
-const ButtonLower = Protocol.ButtonLower;
-const ButtonShared = Protocol.ButtonShared;
-const ButtonUpper = Protocol.ButtonUpper;
+const protocol = mod.protocol;
+const Protocol = protocol.Protocol;
+const ButtonLower = protocol.Constants.ButtonLower;
+const ButtonShared = protocol.Constants.ButtonShared;
+const ButtonUpper = protocol.Constants.ButtonUpper;
 
 const testing = std.testing;
 const ExpectEqual = testing.expectEqual;

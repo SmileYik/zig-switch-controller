@@ -1,149 +1,18 @@
 const std = @import("std");
-const mod = @import("root.zig");
+const protocol = @import("root.zig");
 
-const sys = mod.sys;
+const Constants = protocol.Constants;
+const Report = protocol.Report;
+const SwitchReportParser = protocol.SwitchReportParser;
+
+const sys = protocol.idf.sys;
 const log = std.log.scoped(.switch_controller);
 
 pub const Protocol = @This();
-pub const MAX_REPORT_SIZE = 50;
 const VIBRATOR_BYTES = [_]u8{ 0xA0, 0xB0, 0xC0, 0x90 };
 
-/// 控制器类型定义
-pub const ControllerType = enum {
-    joycon_l,
-    joycon_r,
-    pro_controller,
-
-    pub fn id(self: ControllerType) u8 {
-        return switch (self) {
-            .joycon_l => 0x01,
-            .joycon_r => 0x02,
-            .pro_controller => 0x03,
-        };
-    }
-
-    pub fn connectionInfo(self: ControllerType) u8 {
-        return switch (self) {
-            .joycon_l => 0x0E,
-            .joycon_r => 0x0E,
-            .pro_controller => 0x00,
-        };
-    }
-};
-
-/// 状态与响应枚举
-pub const SwitchResponse = enum(i16) {
-    no_data = -1,
-    malformed = -2,
-    too_short = -3,
-    request_device_info = 0x02,
-    set_shipment = 0x08,
-    spi_read = 0x10,
-    set_mode = 0x03,
-    trigger_buttons = 0x04,
-    toggle_imu = 0x40,
-    enable_vibration = 0x48,
-    set_player = 0x30,
-    set_nfc_ir_state = 0x22,
-    set_nfc_ir_config = 0x21,
-    _,
-};
-
-pub const ButtonUpper = enum(u8) {
-    ZR = 1 << 7,
-    R = 1 << 6,
-    JCL_SL = 1 << 5,
-    JCL_SR = 1 << 4,
-    A = 1 << 3,
-    B = 1 << 2,
-    X = 1 << 1,
-    Y = 1 << 0,
-};
-
-pub const ButtonShared = enum(u8) {
-    PLUS = 1 << 0,
-    MINUS = 1 << 1,
-    R_STICK_PRESSED = 1 << 2,
-    L_STICK_PRESSED = 1 << 3,
-    HOME = 1 << 4,
-    CAPTURE = 1 << 5,
-    // bit6         = 1 << 6 未使用
-    // bit7         = 1 << 7 未使用
-};
-
-pub const ButtonLower = enum(u8) {
-    ZL = 1 << 7,
-    L = 1 << 6,
-    JCR_SL = 1 << 5,
-    JCR_SR = 1 << 4,
-    DPAD_LEFT = 1 << 3,
-    DPAD_RIGHT = 1 << 2,
-    DPAD_UP = 1 << 1,
-    DPAD_DOWN = 1 << 0,
-};
-
-/// 输入报告模式
-pub const InputReportMode = enum {
-    standard,
-    nfc_ir,
-    simple_hid,
-};
-
-pub const Report = struct {
-    response: SwitchResponse,
-    subcommand_id: u8 = 0,
-    payload: []const u8 = &[_]u8{},
-    subcommand: []const u8 = &[_]u8{},
-};
-
-pub const SwitchReportParser = struct {
-    pub const Options = struct {
-        data_len: u8,
-        payload_len: u8 = 10,
-        magic_head: ?u8 = null,
-    };
-
-    data_len: u8,
-    payload_len: u8,
-    magic_head: ?u8,
-
-    pub fn init(opt: SwitchReportParser.Options) SwitchReportParser {
-        return .{
-            .data_len = opt.data_len,
-            .payload_len = opt.payload_len,
-            .magic_head = opt.magic_head,
-        };
-    }
-
-    pub fn parse(self: *const SwitchReportParser, data: []const u8) Report {
-        if (data.len == 0) {
-            return .{ .response = .no_data };
-        } else if (data.len < self.data_len) {
-            return .{ .response = .too_short };
-        } else if (self.magic_head) |magic_head| {
-            if (data[0] != magic_head) {
-                return .{ .response = .malformed };
-            }
-        }
-
-        const payload = data[0..@min(self.payload_len, data.len)];
-        const subcommand = if (data.len > self.payload_len) data[self.payload_len..] else &[_]u8{};
-        const subcommand_id = if (subcommand.len > 0) subcommand[0] else 0;
-
-        const response: SwitchResponse = @enumFromInt(subcommand_id);
-        log.info("init parse: {any}", .{response});
-
-        return .{
-            .response = response,
-            .subcommand_id = subcommand_id,
-            .payload = payload,
-            .subcommand = subcommand,
-        };
-    }
-};
-
 pub const Options = struct {
-    controller_type: ControllerType,
+    controller_type: Constants.ControllerType,
     bt_address_mac: [6]u8,
     colour_body: [3]u8 = [_]u8{ 0x82, 0x82, 0x82 },
     colour_buttons: [3]u8 = [_]u8{ 0x0F, 0x0F, 0x0F },
@@ -153,10 +22,10 @@ pub const Options = struct {
 parser: SwitchReportParser,
 
 bt_address: [6]u8,
-controller_type: ControllerType,
-report: [MAX_REPORT_SIZE]u8,
+controller_type: Constants.ControllerType,
+report: [Constants.MAX_REPORT_SIZE]u8,
 
-mode: ?InputReportMode = null,
+mode: ?Constants.InputReportMode = null,
 player_number: ?u8 = null,
 device_info_queried: bool = false,
 
@@ -195,20 +64,20 @@ pub fn init(opt: Options) Protocol {
 }
 
 /// get current report buffer array. you should invoke `clearReport()` method after you send this report.
-pub fn gerReport(self: *Protocol) *[MAX_REPORT_SIZE]u8 {
+pub fn gerReport(self: *Protocol) *[Constants.MAX_REPORT_SIZE]u8 {
     return &self.report;
 }
 
 /// dupe report to your buf and clear self report.
-pub fn bufReport(self: *Protocol, dest: *[MAX_REPORT_SIZE]u8) void {
+pub fn bufReport(self: *Protocol, dest: *[Constants.MAX_REPORT_SIZE]u8) void {
     @memcpy(dest, &self.report);
     self.setEmptyReport();
 }
 
 /// allocate and dupe self report and return
 pub fn allocReport(self: *Protocol, allocator: std.mem.Allocator) ![]u8 {
-    var report = try allocator.alloc(u8, MAX_REPORT_SIZE);
-    self.bufReport(report[0..MAX_REPORT_SIZE]);
+    var report = try allocator.alloc(u8, Constants.MAX_REPORT_SIZE);
+    self.bufReport(report[0..Constants.MAX_REPORT_SIZE]);
     return report;
 }
 
@@ -360,7 +229,7 @@ pub fn setDeviceInfo(self: *Protocol) void {
     self.report[16] = 0x03;
     // Firmware Minor
     self.report[17] = 0x8B;
-    self.report[18] = self.controller_type.id();
+    self.report[18] = @intFromEnum(self.controller_type);
     // Unknown
     self.report[19] = 0x02;
 

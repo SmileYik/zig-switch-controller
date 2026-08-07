@@ -7,13 +7,25 @@ pub fn build(b: *std.Build) !void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
+    const esp_idf_mod = idf_wrapped_modules(b);
+
+    const protocol_mod = b.createModule(.{
+        .root_source_file = b.path("main/protocol/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+
+    protocol_mod.addImport("esp_idf", esp_idf_mod);
+
     const mod = b.createModule(.{
         .root_source_file = b.path("main/root.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    mod.addImport("esp_idf", idf_wrapped_modules(b));
+    mod.addImport("protocol", protocol_mod);
+    mod.addImport("esp_idf", esp_idf_mod);
 
     const example = b.option([]const u8, "example", "Relative path (from project root) to the Zig source file") orelse "main/app.zig";
 

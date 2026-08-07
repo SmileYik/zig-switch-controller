@@ -8,7 +8,7 @@ const idf = mod.idf;
 const sys = idf.sys;
 const bt = mod.bt;
 
-const ControllerProtocol = mod.Protocol;
+const ControllerProtocol = mod.protocol.Protocol;
 const log = std.log.scoped(.switch_controller);
 
 const switch_mac = [_]u8{ 0x7C, 0xBB, 0x8A, 0x77, 0x88, 0x9C };

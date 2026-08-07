@@ -10,9 +10,9 @@ pub const Button = union(ButtonTag) {
     upper: mod.ButtonUpper,
 };
 
-pub const StickType = enum {
-    left_stick,
-    right_stick,
+pub const StickType = enum(u8) {
+    left_stick = 0x1,
+    right_stick = 0x2,
 };
 
 pub const ButtonUpper = enum(u8) {

@@ -22,10 +22,21 @@ var protocol = ControllerProtocol.init(.{
     },
 });
 
+const ReportSender = struct {
+    report_queue: *mod.ReportQueue,
+
+    pub fn send(self: *ReportSender, report: mod.report.ReportType) !void {
+        try self.report_queue.enqueue(report);
+    }
+
+    pub fn sleep(_: *ReportSender, ms: u32) void {
+        idf.rtos.Task.delayMs(ms);
+    }
+};
+
 // ---------------------------------------------------------------------------
 // 6. 初始化与 app_main
 // ---------------------------------------------------------------------------
-var bluetooth: *bt = undefined;
 export fn app_main() callconv(.c) void {
     var heap = idf.heap.HeapCapsAllocator.init(.{ .@"8bit" = true });
     var arena = std.heap.ArenaAllocator.init(heap.allocator());
@@ -51,18 +62,21 @@ export fn app_main() callconv(.c) void {
     defer queue.deinit();
     queue.start() catch @panic("消息队列启动失败!");
 
-    var controller = mod.Controller.init(.{
+    var controller_handler = ReportSender{
         .report_queue = queue,
+    };
+
+    var controller = mod.controller.Controller.init(&controller_handler, .{
         .heartbeat_rate_hz = 2,
     }) catch |err| {
         log.err("控制器初始化失败!: {s}", .{@errorName(err)});
         return;
     };
     defer controller.deinit();
-    controller.start() catch |err| {
-        log.err("控制器启动失败!: {s}", .{@errorName(err)});
-        return;
-    };
+    // controller.start() catch |err| {
+    //     log.err("控制器启动失败!: {s}", .{@errorName(err)});
+    //     return;
+    // };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
     // _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, queue, 5) catch @panic("Task send_report not created");
@@ -71,7 +85,7 @@ export fn app_main() callconv(.c) void {
         idf.rtos.Task.delayMs(1000);
     }
 
-    var command_pack_opt = mod.Controller.parseCommand(allocator, SCRIPT) catch |err| {
+    var command_pack_opt = mod.controller.command.parseCommand(allocator, SCRIPT) catch |err| {
         log.err("控制器脚本失败!: {s}", .{@errorName(err)});
         return;
     };

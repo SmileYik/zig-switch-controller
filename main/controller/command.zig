@@ -1,27 +1,10 @@
 const std = @import("std");
 const mod = @import("root.zig");
-const Mutex = mod.Mutex;
-
-const protocol = mod.protocol;
-const Protocol = protocol.Protocol;
-const ButtonLower = protocol.Constants.ButtonLower;
-const ButtonShared = protocol.Constants.ButtonShared;
-const ButtonUpper = protocol.Constants.ButtonUpper;
 
 const testing = std.testing;
 const ExpectEqual = testing.expectEqual;
 
-const log = std.log.scoped(.controller);
-
-const Controller = @This();
-
-pub const ButtonState = enum { down, up };
-pub const ButtonTag = enum { lower, shared, upper };
-pub const Button = union(ButtonTag) {
-    lower: ButtonLower,
-    shared: ButtonShared,
-    upper: ButtonUpper,
-};
+const Buttons = std.ArrayList(mod.Button);
 
 pub const CommandTimeUnit = enum {
     /// millisecond
@@ -31,6 +14,7 @@ pub const CommandTimeUnit = enum {
     m,
     h,
 };
+
 pub const CommandTag = enum(u8) {
     end = 0,
     /// UP button
@@ -56,17 +40,19 @@ pub const CommandTag = enum(u8) {
     /// Other commands
     commands = 41,
 };
+
 pub const CombinedButton = struct {
-    button: Button,
+    button: mod.Button,
     combine: bool = false,
 };
+
 pub const Command = union(CommandTag) {
     end,
     up: CombinedButton,
     down: CombinedButton,
     tap: struct { button: CombinedButton, duration: u32 },
-    stick: struct { stick: StickType, x: f32, y: f32 },
-    reset_stick: StickType,
+    stick: struct { stick: mod.StickType, x: f32, y: f32 },
+    reset_stick: mod.StickType,
     reset_button,
     reset_all,
     /// unit: milliseconds
@@ -74,7 +60,9 @@ pub const Command = union(CommandTag) {
     repeat: struct { times: u32, commands: Commands },
     commands: Commands,
 };
+
 pub const Commands = std.ArrayList(Command);
+
 pub const CommandPack = struct {
     allocator: std.mem.Allocator,
     commands: Commands,
@@ -83,292 +71,18 @@ pub const CommandPack = struct {
     }
 };
 
-/// NS Switch Controller Pro x/y value in [0, 4095], u12
-pub const StickCalibration = struct {
-    center_x: i16 = 2048,
-    center_y: i16 = 2048,
-    min_x: i16 = -1600,
-    max_x: i16 = 1600,
-    min_y: i16 = -1600,
-    max_y: i16 = 1600,
-};
-
-pub const StickType = enum {
-    left_stick,
-    right_stick,
-};
-
-pub const Options = struct {
-    left_stick_calibration: StickCalibration = .{},
-    right_stick_calibration: StickCalibration = .{},
-
-    /// unit is HZ
-    heartbeat_rate_hz: u32 = 50,
-    report_queue: *mod.ReportQueue,
-};
-
-button_upper: u8 = 0,
-button_shared: u8 = 0,
-button_lower: u8 = 0,
-left_stick_centre: [3]u8 = [_]u8{ 0, 0, 0 },
-right_stick_centre: [3]u8 = [_]u8{ 0, 0, 0 },
-
-left_stick_calibration: StickCalibration,
-right_stick_calibration: StickCalibration,
-
-mutex: Mutex,
-heartbeat_delay_tick: u32,
-report_queue: *mod.ReportQueue,
-running: std.atomic.Value(bool) = .init(false),
-task_mutex: Mutex,
-
-pub fn init(opt: Options) !Controller {
-    var mutex = try Mutex.init();
-    errdefer mutex.deinit();
-    var task_mutex = try Mutex.init();
-    errdefer task_mutex.deinit();
-
-    return .{
-        .mutex = mutex,
-        .task_mutex = task_mutex,
-        .report_queue = opt.report_queue,
-        .heartbeat_delay_tick = mod.idf.rtos.msToTicks(@trunc(@as(f32, @round(1000.0 / @as(f32, @floatFromInt(opt.heartbeat_rate_hz)))))),
-        .left_stick_calibration = opt.left_stick_calibration,
-        .right_stick_calibration = opt.right_stick_calibration,
-    };
+inline fn deinitCommands(allocator: std.mem.Allocator, commands: *Commands) void {
+    defer commands.deinit(allocator);
+    for (commands.items) |*command|
+        deinitCommand(allocator, command);
 }
 
-pub fn deinit(self: *Controller) void {
-    self.running.store(false, .release);
-    self.task_mutex.lockUncancelable();
-    self.task_mutex.unlock();
-    self.task_mutex.deinit();
-
-    self.mutex.deinit();
-}
-
-inline fn packetUnlocked(self: *Controller) mod.report_queue.ReportType {
-    return .{
-        .input = .{
-            .lower = self.button_lower,
-            .shared = self.button_shared,
-            .upper = self.button_upper,
-            .left_stick_centre = self.left_stick_centre,
-            .right_stick_centre = self.right_stick_centre,
-        },
-    };
-}
-
-pub fn packet(self: *Controller) mod.report_queue.ReportType {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
-    return self.packetUnlocked();
-}
-
-pub fn setStickCalibration(self: *Controller, stick: StickType, calibration: StickCalibration) void {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
-    switch (stick) {
-        .left_stick => {
-            self.left_stick_calibration = calibration;
-        },
-        .right_stick => {
-            self.right_stick_calibration = calibration;
-        },
-    }
-}
-
-pub fn pressButton(self: *Controller, button: Button, state: ButtonState, combine: bool) void {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
-    switch (button) {
-        .lower => |mask| self.button_lower = setButtonBit(self.button_lower, @intFromEnum(mask), state),
-        .shared => |mask| self.button_shared = setButtonBit(self.button_shared, @intFromEnum(mask), state),
-        .upper => |mask| self.button_upper = setButtonBit(self.button_upper, @intFromEnum(mask), state),
-    }
-
-    log.info(
-        "set button [{}] to [{}]. combine = [{}], [lower, shared, upper] = [{x}, {x}, {x}]",
-        .{
-            button,
-            state,
-            combine,
-            self.button_lower,
-            self.button_shared,
-            self.button_upper,
-        },
-    );
-
-    if (!combine)
-        self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
-            log.err("failed to send press button report: {s}", .{@errorName(err)});
-        };
-}
-
-pub fn setStick(self: *Controller, stick: StickType, x: f32, y: f32) void {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
-    switch (stick) {
-        .left_stick => self.left_stick_centre = calibratedPosition(x, y, self.left_stick_calibration),
-        .right_stick => self.right_stick_centre = calibratedPosition(x, y, self.right_stick_calibration),
-    }
-
-    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
-        log.err("failed to send stick report: {s}", .{@errorName(err)});
-    };
-}
-
-pub fn resetStick(self: *Controller, stick: StickType) void {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
-    switch (stick) {
-        .left_stick => @memset(&self.left_stick_centre, 0),
-        .right_stick => @memset(&self.right_stick_centre, 0),
-    }
-
-    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
-        log.err("failed to reset stick report: {s}", .{@errorName(err)});
-    };
-}
-
-pub fn resetButton(self: *Controller) void {
-    self.mutex.lockUncancelable();
-    defer self.mutex.unlock();
-
-    self.button_lower = 0;
-    self.button_shared = 0;
-    self.button_upper = 0;
-
-    self.report_queue.enqueue(self.packetUnlocked()) catch |err| {
-        log.err("failed to send reset button report: {s}", .{@errorName(err)});
-    };
-}
-
-pub fn start(self: *Controller) !void {
-    self.running.store(true, .release);
-    _ = try mod.idf.rtos.Task.create(
-        task,
-        "controller_task",
-        1024 * 4,
-        self,
-        5,
-    );
-}
-
-export fn task(ctx: ?*anyopaque) callconv(.c) void {
-    var self: *Controller = @ptrCast(@alignCast(ctx.?));
-    self.task_mutex.lockUncancelable();
-    defer self.task_mutex.unlock();
-    defer mod.idf.rtos.Task.delete(null);
-
-    while (self.running.load(.acquire)) {
-        // heartbeat packet
-        const report: mod.report_queue.ReportType = .{ .incoming = null };
-        self.report_queue.enqueue(report) catch |err| {
-            log.err("failed to send heartbeat report: {s}", .{@errorName(err)});
-        };
-        mod.idf.rtos.Task.delay(self.heartbeat_delay_tick);
-    }
-}
-
-pub inline fn runCommand(self: *Controller, command: *const Command) void {
-    // log.info("run command {}", .{std.meta.activeTag(command.*)});
+fn deinitCommand(allocator: std.mem.Allocator, command: *Command) void {
     switch (command.*) {
-        .down => |b| self.pressButton(b.button, .down, b.combine),
-        .up => |b| self.pressButton(b.button, .up, b.combine),
-        .reset_all => {
-            self.resetButton();
-            self.resetStick(.left_stick);
-            self.resetStick(.right_stick);
-        },
-        .reset_button => self.resetButton(),
-        .reset_stick => |stick| self.resetStick(stick),
-        .stick => |stick| self.setStick(stick.stick, stick.x, stick.y),
-        .wait => |ms| mod.idf.rtos.Task.delayMs(ms),
-        .commands => |*cs| self.runCommands(cs),
-        .repeat => |*repeat| {
-            for (0..repeat.times) |_| {
-                self.runCommands(&repeat.commands);
-            }
-        },
+        .commands => |*commands| deinitCommands(allocator, commands),
+        .repeat => |*repeat| deinitCommands(allocator, &repeat.commands),
         else => {},
     }
-}
-
-pub fn runCommands(self: *Controller, commands: *const Commands) void {
-    for (commands.items) |*item| {
-        self.runCommand(item);
-    }
-}
-
-pub fn runCommandPack(self: *Controller, command_pack: *const CommandPack) void {
-    self.runCommands(&command_pack.commands);
-}
-
-/// set button bit. if state is press then set bit to `1`, else set bit to `0`.
-inline fn setButtonBit(byte: u8, mask: u8, state: ButtonState) u8 {
-    return switch (state) {
-        .down => byte | mask,
-        .up => byte & ~mask,
-    };
-}
-
-test "setButtonBit" {
-    try ExpectEqual(0x01, setButtonBit(0x00, 0x01, .down));
-    try ExpectEqual(0xA2, setButtonBit(0xA3, 0x01, .up));
-    try ExpectEqual(0xA3, setButtonBit(0xA3, 0x01, .down));
-    try ExpectEqual(0xA3, setButtonBit(0xB3, 0x10, .up));
-}
-
-inline fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
-    const fx = @as(f32, @floatFromInt(calibration.center_x)) + @abs(x) *
-        if (x < 0)
-            @as(f32, @floatFromInt(calibration.min_x))
-        else
-            @as(f32, @floatFromInt(calibration.max_x));
-
-    const fy = @as(f32, @floatFromInt(calibration.center_y)) + @abs(y) *
-        if (y < 0)
-            @as(f32, @floatFromInt(calibration.min_y))
-        else
-            @as(f32, @floatFromInt(calibration.max_y));
-
-    const ix = @as(i16, @intFromFloat(@round(fx)));
-    const iy = @as(i16, @intFromFloat(@round(fy)));
-
-    const ux: u16 = @intCast(@as(i16, std.math.clamp(ix, 0, std.math.maxInt(u12))));
-    const uy: u16 = @intCast(@as(i16, std.math.clamp(iy, 0, std.math.maxInt(u12))));
-
-    return .{
-        @truncate(ux),
-        @truncate((((uy & 0x0F) << 4) | (ux >> 8) & 0x0F)),
-        @truncate(uy >> 4),
-    };
-}
-
-pub inline fn calibratedPosition(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
-    return calibratedPositionInner(
-        std.math.clamp(x, -1.0, 1.0),
-        std.math.clamp(y, -1.0, 1.0),
-        calibration,
-    );
-}
-
-test "test calibratedPosition" {
-    const result = calibratedPosition(-1.5, 0, .{
-        .center_x = 2070,
-        .center_y = 2013,
-        .min_x = -1522,
-        .max_x = 1414,
-        .min_y = -1531,
-        .max_y = 1510,
-    });
-    std.debug.print("{x}\n", .{result[0..]});
 }
 
 pub inline fn isUpperString(str: []const u8) bool {
@@ -405,22 +119,22 @@ pub inline fn maxEnumFieldLen(comptime T: type) comptime_int {
 }
 
 /// `button_name` should be upper.
-inline fn stringToButtonInner(button_name: []const u8) ?Button {
-    return if (std.meta.stringToEnum(ButtonUpper, button_name)) |btn|
+inline fn stringToButtonInner(button_name: []const u8) ?mod.Button {
+    return if (std.meta.stringToEnum(mod.ButtonUpper, button_name)) |btn|
         .{ .upper = btn }
-    else if (std.meta.stringToEnum(ButtonLower, button_name)) |btn|
+    else if (std.meta.stringToEnum(mod.ButtonLower, button_name)) |btn|
         .{ .lower = btn }
-    else if (std.meta.stringToEnum(ButtonShared, button_name)) |btn|
+    else if (std.meta.stringToEnum(mod.ButtonShared, button_name)) |btn|
         .{ .shared = btn }
     else
         null;
 }
 
-pub inline fn stringToButton(button_name: []const u8) ?Button {
+pub inline fn stringToButton(button_name: []const u8) ?mod.Button {
     if (isUpperString(button_name)) {
         return stringToButtonInner(button_name);
     } else {
-        const max_len = comptime maxEnumsFieldLen(.{ ButtonLower, ButtonShared, ButtonUpper });
+        const max_len = comptime maxEnumsFieldLen(.{ mod.ButtonLower, mod.ButtonShared, mod.ButtonUpper });
         if (button_name.len > max_len) return null;
         var buf: [max_len]u8 = undefined;
         const upper_name = std.ascii.upperString(&buf, button_name);
@@ -429,12 +143,12 @@ pub inline fn stringToButton(button_name: []const u8) ?Button {
 }
 
 test "stringToButton" {
-    try ExpectEqual(Button{ .lower = .DPAD_RIGHT }, stringToButton("dpad_right"));
-    try ExpectEqual(Button{ .lower = .DPAD_RIGHT }, stringToButton("dpaD_right"));
-    try ExpectEqual(Button{ .lower = .DPAD_RIGHT }, stringToButton("DPAD_RIGHT"));
-    try ExpectEqual(Button{ .shared = .HOME }, stringToButton("home"));
-    try ExpectEqual(Button{ .upper = .A }, stringToButton("A"));
-    try ExpectEqual(Button{ .upper = .A }, stringToButton("a"));
+    try ExpectEqual(mod.Button{ .lower = .DPAD_RIGHT }, stringToButton("dpad_right"));
+    try ExpectEqual(mod.Button{ .lower = .DPAD_RIGHT }, stringToButton("dpaD_right"));
+    try ExpectEqual(mod.Button{ .lower = .DPAD_RIGHT }, stringToButton("DPAD_RIGHT"));
+    try ExpectEqual(mod.Button{ .shared = .HOME }, stringToButton("home"));
+    try ExpectEqual(mod.Button{ .upper = .A }, stringToButton("A"));
+    try ExpectEqual(mod.Button{ .upper = .A }, stringToButton("a"));
 }
 
 pub inline fn lowerStringToEnum(comptime E: anytype, name: []const u8) ?E {
@@ -449,25 +163,25 @@ pub inline fn lowerStringToEnum(comptime E: anytype, name: []const u8) ?E {
     }
 }
 
-pub inline fn stringToStick(stick_name: []const u8) ?StickType {
-    return lowerStringToEnum(StickType, stick_name);
+pub inline fn stringToStick(stick_name: []const u8) ?mod.StickType {
+    return lowerStringToEnum(mod.StickType, stick_name);
 }
 
 test "stringToStick" {
-    try ExpectEqual(StickType.left_stick, stringToStick("left_stick"));
-    try ExpectEqual(StickType.left_stick, stringToStick("lefT_stick"));
-    try ExpectEqual(StickType.left_stick, stringToStick("LEFT_STICK"));
-    try ExpectEqual(StickType.right_stick, stringToStick("right_stick"));
+    try ExpectEqual(mod.StickType.left_stick, stringToStick("left_stick"));
+    try ExpectEqual(mod.StickType.left_stick, stringToStick("lefT_stick"));
+    try ExpectEqual(mod.StickType.left_stick, stringToStick("LEFT_STICK"));
+    try ExpectEqual(mod.StickType.right_stick, stringToStick("right_stick"));
 }
 
-pub inline fn stringToButtonState(button_state_name: []const u8) ?ButtonState {
-    return lowerStringToEnum(ButtonState, button_state_name);
+pub inline fn stringToButtonState(button_state_name: []const u8) ?mod.ButtonState {
+    return lowerStringToEnum(mod.ButtonState, button_state_name);
 }
 
 test "stringToButtonState" {
-    try ExpectEqual(ButtonState.up, stringToButtonState("Up"));
-    try ExpectEqual(ButtonState.up, stringToButtonState("up"));
-    try ExpectEqual(ButtonState.up, stringToButtonState("UP"));
+    try ExpectEqual(mod.ButtonState.up, stringToButtonState("Up"));
+    try ExpectEqual(mod.ButtonState.up, stringToButtonState("up"));
+    try ExpectEqual(mod.ButtonState.up, stringToButtonState("UP"));
 }
 
 inline fn parseTimeString(str: []const u8) !u32 {
@@ -517,22 +231,8 @@ test "parseTimeString" {
     try testing.expectError(error.WrongTimeUnit, parseTimeString("0.S1s"));
 }
 
-inline fn deinitCommands(allocator: std.mem.Allocator, commands: *Commands) void {
-    defer commands.deinit(allocator);
-    for (commands.items) |*command|
-        deinitCommand(allocator, command);
-}
-
-fn deinitCommand(allocator: std.mem.Allocator, command: *Command) void {
-    switch (command.*) {
-        .commands => |*commands| deinitCommands(allocator, commands),
-        .repeat => |*repeat| deinitCommands(allocator, &repeat.commands),
-        else => {},
-    }
-}
-
-pub fn parseCommandButtons(allocator: std.mem.Allocator, iter: anytype) !std.ArrayList(Button) {
-    var buttons: std.ArrayList(Button) = try std.ArrayList(Button).initCapacity(allocator, 4);
+pub fn parseCommandButtons(allocator: std.mem.Allocator, iter: anytype) !Buttons {
+    var buttons: Buttons = try Buttons.initCapacity(allocator, 4);
     errdefer buttons.deinit(allocator);
     while (iter.next()) |str| {
         const btn = stringToButton(str) orelse return error.UnknownButton;
@@ -560,7 +260,7 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             try commands.append(allocator, Command{ .wait = ms });
         },
         .down => {
-            var buttons: std.ArrayList(Button) = try parseCommandButtons(allocator, &iter);
+            var buttons = try parseCommandButtons(allocator, &iter);
             defer buttons.deinit(allocator);
 
             var items = try commands.addManyAsSlice(allocator, buttons.items.len);
@@ -572,7 +272,7 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             }
         },
         .up => {
-            var buttons: std.ArrayList(Button) = try parseCommandButtons(allocator, &iter);
+            var buttons = try parseCommandButtons(allocator, &iter);
             defer buttons.deinit(allocator);
 
             var items = try commands.addManyAsSlice(allocator, buttons.items.len);
@@ -589,7 +289,7 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             else
                 return error.MissingArgument;
 
-            var buttons: std.ArrayList(Button) = try parseCommandButtons(allocator, &iter);
+            var buttons = try parseCommandButtons(allocator, &iter);
             defer buttons.deinit(allocator);
 
             var items = try commands.addManyAsSlice(allocator, buttons.items.len * 2 + 1);
@@ -777,8 +477,8 @@ test "parseCommand commands" {
         try ExpectEqual(5, pack.commands.items.len);
         try ExpectEqual(CommandTag.reset_all, pack.commands.items[0]);
         try ExpectEqual(Command{ .wait = 200 }, pack.commands.items[1]);
-        try ExpectEqual(Command{ .down = .{ .upper = .B } }, pack.commands.items[2]);
-        try ExpectEqual(Command{ .up = .{ .lower = .L } }, pack.commands.items[3]);
+        try ExpectEqual(Command{ .down = .{ .button = .{ .upper = .B } } }, pack.commands.items[2]);
+        try ExpectEqual(Command{ .up = .{ .button = .{ .lower = .L } } }, pack.commands.items[3]);
         try ExpectEqual(Command{ .stick = .{ .stick = .left_stick, .x = 0.5, .y = 0.25 } }, pack.commands.items[4]);
     }
 }
@@ -809,7 +509,7 @@ test "parseCommand repeat commands" {
         try ExpectEqual(Command{ .stick = .{ .stick = .left_stick, .x = 1.0, .y = 0 } }, list.items[0]);
         try ExpectEqual(Command{ .wait = 1000 }, list.items[1]);
         try ExpectEqual(Command{ .stick = .{ .stick = .right_stick, .x = -1.0, .y = -0.15 } }, list.items[2]);
-        try ExpectEqual(Command{ .wait = 1523 }, list.items[3]);
+        try ExpectEqual(Command{ .wait = 1524 }, list.items[3]);
     }
 }
 
@@ -833,7 +533,7 @@ test "parseCommand merge commands" {
     try testing.expect(opt != null);
     if (opt) |*pack| {
         defer pack.deinit();
-        try ExpectEqual(3, pack.commands.items.len);
+        try ExpectEqual(7, pack.commands.items.len);
         try ExpectEqual(Command{ .wait = 2900 }, pack.commands.items[0]);
         try ExpectEqual(CommandTag.reset_all, pack.commands.items[1]);
     }

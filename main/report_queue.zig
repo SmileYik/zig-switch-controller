@@ -2,29 +2,13 @@ const std = @import("std");
 const mod = @import("root.zig");
 const Allocator = std.mem.Allocator;
 const Protocol = mod.protocol.Protocol;
+
+const ReportTag = mod.report.ReportTag;
+const ReportType = mod.report.ReportType;
+
 const testing = std.testing;
 const ExpectEqual = testing.expectEqual;
 const log = std.log.scoped(.report_queue);
-
-pub const ReportTag = enum {
-    incoming,
-    sending,
-    input,
-    stop,
-};
-
-pub const ReportType = union(ReportTag) {
-    incoming: ?[]u8,
-    sending: []u8,
-    input: struct {
-        upper: u8 = 0,
-        shared: u8 = 0,
-        lower: u8 = 0,
-        left_stick_centre: [3]u8 = [_]u8{ 0, 0, 0 },
-        right_stick_centre: [3]u8 = [_]u8{ 0, 0, 0 },
-    },
-    stop,
-};
 
 pub fn ReportQueue(comptime size: usize) type {
     return struct {

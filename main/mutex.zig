@@ -1,6 +1,5 @@
 const std = @import("std");
-const mod = @import("root.zig");
-const sys = mod.sys;
+const sys = @import("esp_idf").sys;
 
 const MutexHandle = sys.QueueHandle_t;
 

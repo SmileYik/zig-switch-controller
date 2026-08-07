@@ -9,14 +9,37 @@ pub fn build(b: *std.Build) !void {
 
     const esp_idf_mod = idf_wrapped_modules(b);
 
+    const report_mod = b.createModule(.{
+        .root_source_file = b.path("main/report.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+
+    const mutex_mod = b.createModule(.{
+        .root_source_file = b.path("main/mutex.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mutex_mod.addImport("esp_idf", esp_idf_mod);
+
     const protocol_mod = b.createModule(.{
         .root_source_file = b.path("main/protocol/root.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-
     protocol_mod.addImport("esp_idf", esp_idf_mod);
+
+    const controller_mod = b.createModule(.{
+        .root_source_file = b.path("main/controller/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    controller_mod.addImport("report", report_mod);
+    controller_mod.addImport("mutex", mutex_mod);
 
     const mod = b.createModule(.{
         .root_source_file = b.path("main/root.zig"),
@@ -24,6 +47,9 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .link_libc = true,
     });
+    mod.addImport("report", report_mod);
+    mod.addImport("mutex", mutex_mod);
+    mod.addImport("controller", controller_mod);
     mod.addImport("protocol", protocol_mod);
     mod.addImport("esp_idf", esp_idf_mod);
 

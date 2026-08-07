@@ -6,6 +6,10 @@ const ExpectEqual = testing.expectEqual;
 
 const Buttons = std.ArrayList(mod.Button);
 
+pub const parser = @import("command_parser.zig");
+pub const runner = @import("command_runner.zig");
+pub const compiler = @import("command_compiler.zig");
+
 pub const CommandTimeUnit = enum {
     /// millisecond
     ms,
@@ -48,6 +52,8 @@ pub const CommandTag = enum(u8) {
     ///     COMMANDS
     /// END
     repeat = 61,
+    repeat_u16 = 62,
+    repeat_u8 = 63,
 
     /// Other commands
     commands = 81,
@@ -75,6 +81,8 @@ pub const Command = union(CommandTag) {
     wait_u8: u8,
     wait_u16: u16,
     repeat: struct { times: u32, commands: Commands },
+    repeat_u16,
+    repeat_u8,
     commands: Commands,
 };
 
@@ -83,8 +91,13 @@ pub const Commands = std.ArrayList(Command);
 pub const CommandPack = struct {
     allocator: std.mem.Allocator,
     commands: Commands,
+
     pub fn deinit(self: *CommandPack) void {
         deinitCommands(self.allocator, &self.commands);
+    }
+
+    pub fn compile(self: *const CommandPack, allocator: std.mem.Allocator, endian: std.builtin.Endian) !std.ArrayList(u8) {
+        return try compiler.compile(allocator, self, endian);
     }
 };
 
@@ -101,5 +114,3 @@ fn deinitCommand(allocator: std.mem.Allocator, command: *Command) void {
         else => {},
     }
 }
-
-pub const parser = @import("command_parser.zig");

@@ -25,58 +25,6 @@ pub const StickCalibration = struct {
     max_y: i16 = 1600,
 };
 
-const Handler = struct {
-    ctx: *anyopaque,
-    sendFn: *const fn (ctx: *anyopaque, report: ReportType) anyerror!void = undefined,
-    sleepFn: *const fn (ctx: *anyopaque, ms: u32) void = undefined,
-
-    pub inline fn init(handler: anytype) Handler {
-        const Pointer = @TypeOf(handler);
-        comptime {
-            const info = @typeInfo(Pointer);
-            if (info != .pointer or info.pointer.size != .one) {
-                @panic("handler need be a struct pointer");
-            }
-            if (!std.meta.hasMethod(Pointer, "send")) {
-                @panic("handler need has a function named send.");
-            }
-            if (!std.meta.hasMethod(Pointer, "sleep")) {
-                @panic("handler need has a function named sleep.");
-            }
-        }
-
-        var interface: Handler = .{ .ctx = handler };
-
-        if (std.meta.hasMethod(Pointer, "send")) {
-            interface.sendFn = (struct {
-                fn send(ctx: *anyopaque, report: ReportType) !void {
-                    var ptr: Pointer = @ptrCast(@alignCast(ctx));
-                    try ptr.send(report);
-                }
-            }).send;
-        }
-
-        if (std.meta.hasMethod(Pointer, "sleep")) {
-            interface.sleepFn = (struct {
-                fn sleep(ctx: *anyopaque, ms: u32) void {
-                    var ptr: Pointer = @ptrCast(@alignCast(ctx));
-                    ptr.sleep(ms);
-                }
-            }).sleep;
-        }
-
-        return interface;
-    }
-
-    pub inline fn send(self: *Handler, report: ReportType) !void {
-        return self.sendFn(self.ctx, report);
-    }
-
-    pub inline fn sleep(self: *Handler, ms: u32) void {
-        self.sleepFn(self.ctx, ms);
-    }
-};
-
 pub const Options = struct {
     left_stick_calibration: StickCalibration = .{},
     right_stick_calibration: StickCalibration = .{},
@@ -95,24 +43,32 @@ left_stick_calibration: StickCalibration,
 right_stick_calibration: StickCalibration,
 
 mutex: Mutex,
-handler: Handler,
+allocator: std.mem.Allocator,
+handler: mod.ControllerHandler,
 running: std.atomic.Value(bool) = .init(false),
 
-pub fn init(handler: anytype, opt: Options) !Controller {
+pub fn init(allocator: std.mem.Allocator, handler: anytype, opt: Options) !*Controller {
+    const ptr: *Controller = try allocator.create(Controller);
+    errdefer allocator.destroy(ptr);
+
     var mutex = try Mutex.init();
     errdefer mutex.deinit();
 
-    return .{
+    ptr.* = .{
         .mutex = mutex,
-        .handler = Handler.init(handler),
+        .allocator = allocator,
+        .handler = mod.ControllerHandler.init(handler),
         .left_stick_calibration = opt.left_stick_calibration,
         .right_stick_calibration = opt.right_stick_calibration,
     };
+
+    return ptr;
 }
 
 pub fn deinit(self: *Controller) void {
     self.running.store(false, .release);
     self.mutex.deinit();
+    self.allocator.destroy(self);
 }
 
 inline fn packetUnlocked(self: *Controller) ReportType {
@@ -215,42 +171,6 @@ pub fn resetButton(self: *Controller) void {
     self.handler.send(self.packetUnlocked()) catch |err| {
         log.err("failed to send reset button report: {s}", .{@errorName(err)});
     };
-}
-
-pub inline fn runCommand(self: *Controller, command: *const mod.command.Command) void {
-    // log.info("run command {}", .{std.meta.activeTag(command.*)});
-    switch (command.*) {
-        .down => |b| self.pressButton(b.button, .down, b.combine),
-        .up => |b| self.pressButton(b.button, .up, b.combine),
-        .reset_all => {
-            self.resetButton();
-            self.resetStick(.left_stick);
-            self.resetStick(.right_stick);
-        },
-        .reset_button => self.resetButton(),
-        .reset_stick => |stick| self.resetStick(stick),
-        .stick => |stick| self.setStick(stick.stick, stick.x, stick.y),
-        .wait => |ms| self.handler.sleep(ms),
-        .wait_u16 => |ms| self.handler.sleep(@intCast(ms)),
-        .wait_u8 => |ms| self.handler.sleep(@intCast(ms)),
-        .commands => |*cs| self.runCommands(cs),
-        .repeat => |*repeat| {
-            for (0..repeat.times) |_| {
-                self.runCommands(&repeat.commands);
-            }
-        },
-        else => {},
-    }
-}
-
-pub fn runCommands(self: *Controller, commands: *const mod.command.Commands) void {
-    for (commands.items) |*item| {
-        self.runCommand(item);
-    }
-}
-
-pub fn runCommandPack(self: *Controller, command_pack: *const mod.command.CommandPack) void {
-    self.runCommands(&command_pack.commands);
 }
 
 /// set button bit. if state is press then set bit to `1`, else set bit to `0`.

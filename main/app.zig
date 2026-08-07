@@ -34,6 +34,8 @@ const ReportSender = struct {
     }
 };
 
+const Runner = mod.controller.command.runner.CommandRunner(mod.controller.command.runner.CallStackAlloc);
+
 // ---------------------------------------------------------------------------
 // 6. 初始化与 app_main
 // ---------------------------------------------------------------------------
@@ -66,9 +68,13 @@ export fn app_main() callconv(.c) void {
         .report_queue = queue,
     };
 
-    var controller = mod.controller.Controller.init(&controller_handler, .{
-        .heartbeat_rate_hz = 2,
-    }) catch |err| {
+    var controller = mod.controller.Controller.init(
+        allocator,
+        &controller_handler,
+        .{
+            .heartbeat_rate_hz = 2,
+        },
+    ) catch |err| {
         log.err("控制器初始化失败!: {s}", .{@errorName(err)});
         return;
     };
@@ -79,7 +85,7 @@ export fn app_main() callconv(.c) void {
     // };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
-    // _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, queue, 5) catch @panic("Task send_report not created");
+    _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, controller, 5) catch @panic("Task send_report not created");
 
     while (!queue.is_connected.load(.acquire)) {
         idf.rtos.Task.delayMs(1000);
@@ -91,7 +97,27 @@ export fn app_main() callconv(.c) void {
     };
     if (command_pack_opt) |*pack| {
         defer pack.deinit();
-        controller.runCommandPack(pack);
+        var bytecode = pack.compile(allocator, .little) catch |err| {
+            log.err("编译宏字节码失败!: {s}", .{@errorName(err)});
+            return;
+        };
+        log.info("bytecode [len={d}]: {x}", .{ bytecode.items.len, bytecode.items });
+        defer bytecode.deinit(allocator);
+
+        var runner: Runner = .{ .controller = controller, .stack = .init(allocator) };
+        runner.runByteCode(bytecode.items) catch |err| {
+            log.err("运行宏字节码失败!: {s}", .{@errorName(err)});
+            return;
+        };
+    }
+    log.err("main task quit!", .{});
+}
+
+export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
+    var controller: *mod.controller.Controller = @ptrCast(@alignCast(ctx.?));
+    while (true) {
+        controller.handler.send(controller.packet()) catch {};
+        idf.rtos.Task.delayMs(500);
     }
 }
 

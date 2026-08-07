@@ -20,24 +20,21 @@ pub fn init() MutexError!Mutex {
     return .{ .handle = handle };
 }
 
-pub fn deinit(self: Mutex) void {
+pub fn deinit(self: *Mutex) void {
     sys.vSemaphoreDelete(self.handle);
 }
 
-pub fn lock(self: Mutex) MutexError!void {
+pub fn lock(self: *Mutex) MutexError!void {
     if (sys.xSemaphoreTake(self.handle, sys.portMAX_DELAY) != sys.pdTRUE) {
         return MutexError.LockFaield;
     }
 }
 
-pub fn lockUncancelable(self: Mutex) void {
-    while (true) {
-        self.lock() catch continue;
-        return;
-    }
+pub fn lockUncancelable(self: *Mutex) void {
+    while (!self.tryLock(1000)) {}
 }
 
-pub fn tryLock(self: Mutex, wait_ms: u32) bool {
+pub fn tryLock(self: *Mutex, wait_ms: u32) bool {
     return sys.pdTRUE ==
         sys.xSemaphoreTake(
             self.handle,
@@ -45,6 +42,6 @@ pub fn tryLock(self: Mutex, wait_ms: u32) bool {
         );
 }
 
-pub fn unlock(self: Mutex) void {
+pub fn unlock(self: *Mutex) void {
     _ = sys.xSemaphoreGive(self.handle);
 }

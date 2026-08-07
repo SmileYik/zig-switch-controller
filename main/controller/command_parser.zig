@@ -186,31 +186,33 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             const ms = try parseTimeString(time_str);
             try commands.append(allocator, Command{ .wait = ms });
         },
-        .down => {
+        .down, .down_combine => {
             var buttons = try parseCommandButtons(allocator, &iter);
             defer buttons.deinit(allocator);
 
+            const active_combine = tag == CommandTag.down_combine;
             var items = try commands.addManyAsSlice(allocator, buttons.items.len);
             for (buttons.items, 0..) |btn, i| {
-                const combined = i + 1 < buttons.items.len;
+                const combined = active_combine and i + 1 < buttons.items.len;
                 items[i] = .{
                     .down = .{ .button = btn, .combine = combined },
                 };
             }
         },
-        .up => {
+        .up, .up_combine => {
             var buttons = try parseCommandButtons(allocator, &iter);
             defer buttons.deinit(allocator);
 
+            const active_combine = tag == CommandTag.up_combine;
             var items = try commands.addManyAsSlice(allocator, buttons.items.len);
             for (buttons.items, 0..) |btn, i| {
-                const combined = i + 1 < buttons.items.len;
+                const combined = active_combine and i + 1 < buttons.items.len;
                 items[i] = .{
                     .up = .{ .button = btn, .combine = combined },
                 };
             }
         },
-        .tap => {
+        .tap, .tap_combine => {
             const duration = if (iter.next()) |time_str|
                 try parseTimeString(time_str)
             else
@@ -224,8 +226,9 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             items[buttons.items.len] = .{ .wait = duration };
             var ups = items[buttons.items.len + 1 ..];
 
+            const active_combine = tag == CommandTag.tap_combine;
             for (buttons.items, 0..) |btn, i| {
-                const combined = i + 1 < buttons.items.len;
+                const combined = active_combine and i + 1 < buttons.items.len;
                 downs[i] = .{
                     .down = .{ .button = btn, .combine = combined },
                 };

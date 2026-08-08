@@ -528,3 +528,24 @@ test "parseCommand merge commands" {
         try ExpectEqual(CommandTag.reset_all, pack.commands.items[1]);
     }
 }
+
+pub const CheckError = struct {
+    index: ?usize = null,
+    err: anyerror,
+};
+
+pub fn checkCommand(
+    allocator: std.mem.Allocator,
+    script: []const u8,
+) ?CheckError {
+    const trimmed = std.mem.trim(u8, script, " \t\r\n");
+    var lines = std.mem.splitAny(u8, trimmed, "\n");
+
+    var opt = parseCommandBlock(allocator, &lines) catch |err| {
+        return .{ .index = lines.index, .err = err };
+    };
+    if (opt) |*list| {
+        mod.command.deinitCommands(allocator, list);
+    }
+    return null;
+}

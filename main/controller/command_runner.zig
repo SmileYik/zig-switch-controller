@@ -104,53 +104,122 @@ pub const CallStackAlloc = struct {
     }
 };
 
-// pub const CallStack = struct {
-//     pub const VTable = struct {
-//         pushFn: *const fn (ctx: *anyopaque, frame: StackFrame) anyerror!void,
-//         topFn: *const fn (ctx: *anyopaque) *StackFrame,
-//         popFn: *const fn (ctx: *anyopaque) StackFrame,
+pub const ByteCodeReaderSafe = ByteCodeReader(true);
+pub const ByteCodeReaderUnsafe = ByteCodeReader(false);
 
-//         lenFn: *const fn (ctx: *anyopaque) usize,
-//         capacityFn: *const fn (ctx: *anyopaque) usize,
+pub fn ByteCodeReader(comptime safe_mode: bool) type {
+    return struct {
+        const Self = @This();
+        pc: usize = 0,
+        bytecode: []const u8,
+        bytecode_len: usize = 0,
+        endian: std.builtin.Endian = .little,
 
-//         deinitFn: *const fn (ctx: *anyopaque) void,
-//     };
+        inline fn setPCNocheck(self: *Self, pc: usize) !void {
+            self.pc = pc;
+        }
 
-//     ctx: *anyopaque,
-//     vtable: *const VTable,
+        inline fn setPCSafe(self: *Self, pc: usize) !void {
+            if (pc > self.bytecode_len) return error.PCOverflow;
+            try self.setPCNocheck(pc);
+        }
 
-//     pub inline fn push(self: *CallStack, frame: StackFrame) !void {
-//         try self.vtable.pushFn(self.ctx, frame);
-//     }
+        inline fn addPCNocheck(self: *Self, add: usize) !void {
+            self.pc += add;
+        }
 
-//     pub inline fn top(self: *CallStack) *StackFrame {
-//         return self.vtable.topFn(self.ctx);
-//     }
+        inline fn addPCSafe(self: *Self, add: usize) !void {
+            self.pc = try std.math.add(usize, self.pc, add);
+            if (self.pc > self.bytecode_len) return error.PCOverflow;
+        }
 
-//     pub inline fn pop(self: *CallStack) StackFrame {
-//         return self.vtable.popFn(self.ctx);
-//     }
+        inline fn setPC(self: *Self, pc: usize) !void {
+            if (safe_mode) {
+                try self.setPCSafe(pc);
+            } else {
+                try self.setPCNocheck(pc);
+            }
+        }
 
-//     pub inline fn len(self: *CallStack) usize {
-//         return self.vtable.lenFn(self.ctx);
-//     }
+        inline fn addPC(self: *Self, add: usize) !void {
+            if (safe_mode) {
+                try self.addPCSafe(add);
+            } else {
+                try self.addPCNocheck(add);
+            }
+        }
 
-//     pub inline fn capacity(self: *CallStack) usize {
-//         return self.vtable.capacityFn(self.ctx);
-//     }
+        pub fn skipBytes(self: *Self, bytes: usize) !void {
+            try self.addPC(bytes);
+        }
 
-//     pub inline fn isEmpty(self: *CallStack) bool {
-//         return self.len() == 0;
-//     }
+        pub fn readInt(self: *Self, comptime T: type) !T {
+            const type_size = @sizeOf(T);
+            try self.addPC(type_size);
+            return std.mem.readInt(
+                T,
+                self.bytecode[self.pc - type_size .. self.pc][0..type_size],
+                self.endian,
+            );
+        }
 
-//     pub inline fn isFull(self: *CallStack) bool {
-//         return self.len() >= self.capacity();
-//     }
+        pub fn readFloat32(self: *Self) !f32 {
+            return @bitCast(try self.readInt(u32));
+        }
 
-//     pub inline fn deinit(self: *CallStack) void {
-//         self.vtable.deinitFn(self.ctx);
-//     }
-// };
+        pub fn readByte(self: *Self) !u8 {
+            try self.addPC(1);
+            const byte = self.bytecode[self.pc - 1];
+            return byte;
+        }
+
+        pub fn readEnum(self: *Self, comptime T: type) !T {
+            const t = comptime blk: {
+                const info = @typeInfo(T);
+                switch (info) {
+                    .@"enum" => |e| {
+                        const tag_info = @typeInfo(e.tag_type);
+                        switch (tag_info) {
+                            .int => break :blk e.tag_type,
+                            else => @compileError("Not support type"),
+                        }
+                    },
+                    else => @compileError("Only support enum type"),
+                }
+            };
+
+            const value = try self.readInt(t);
+            if (safe_mode) {
+                inline for (@typeInfo(T).@"enum".fields) |field| {
+                    if (field.value == value) {
+                        return @enumFromInt(value);
+                    }
+                }
+                return error.ReadWrongEnum;
+            } else {
+                return @enumFromInt(value);
+            }
+        }
+
+        pub fn len(self: *Self) usize {
+            return self.bytecode_len;
+        }
+
+        pub fn hasNext(self: *Self) bool {
+            return self.pc < self.bytecode_len;
+        }
+
+        pub fn peekByte(self: *Self) !u8 {
+            if (safe_mode) {
+                if (self.hasNext())
+                    return self.bytecode[self.pc];
+                return error.PCOverflow;
+            } else {
+                return self.bytecode[self.pc];
+            }
+        }
+    };
+}
 
 pub fn CommandRunner(comptime CallStack: type) type {
     return struct {
@@ -158,7 +227,6 @@ pub fn CommandRunner(comptime CallStack: type) type {
 
         controller: *mod.Controller,
         stack: CallStack,
-        pc: usize = 0,
 
         pub fn deinit(self: *Self) void {
             self.stack.deinit();
@@ -201,120 +269,127 @@ pub fn CommandRunner(comptime CallStack: type) type {
         }
 
         pub fn runByteCode(self: *Self, bytecode: []const u8) !void {
-            if (bytecode.len <= 1) return;
+            var reader = ByteCodeReaderSafe{
+                .pc = 0,
+                .bytecode = bytecode,
+                .bytecode_len = bytecode.len,
+            };
+            if (!reader.hasNext()) {
+                return;
+            }
+            const endian_byte = try reader.readByte();
+            reader.endian = mod.byte2Endian(endian_byte);
 
-            self.pc = 1;
-            const endian = mod.byte2Endian(bytecode[0]);
+            try self.runByteCodeInner(&reader);
+        }
 
+        pub fn runByteCodeUnsafe(self: *Self, bytecode: []const u8) !void {
+            var reader = ByteCodeReaderUnsafe{
+                .pc = 0,
+                .bytecode = bytecode,
+                .bytecode_len = bytecode.len,
+            };
+            if (!reader.hasNext()) {
+                return;
+            }
+            const endian_byte = try reader.readByte();
+            reader.endian = mod.byte2Endian(endian_byte);
+
+            try self.runByteCodeInner(&reader);
+        }
+
+        inline fn runByteCodeInner(self: *Self, reader: anytype) !void {
             self.stack.clear();
 
-            while (self.pc < bytecode.len) {
-                const tag_val = bytecode[self.pc];
-                self.pc += 1;
-
-                const tag: mod.command.CommandTag = @enumFromInt(tag_val);
+            while (reader.hasNext()) {
+                const tag: mod.command.CommandTag = try reader.readEnum(mod.command.CommandTag);
                 switch (tag) {
                     .wait => {
-                        const ms = std.mem.readInt(u32, bytecode[self.pc..][0..4], endian);
-                        self.pc += 4;
+                        const ms = try reader.readInt(u32);
                         self.controller.handler.sleep(ms);
                     },
                     .wait_u16 => {
-                        const ms = std.mem.readInt(u16, bytecode[self.pc..][0..2], endian);
-                        self.pc += 2;
+                        const ms = try reader.readInt(u16);
                         self.controller.handler.sleep(@intCast(ms));
                     },
                     .wait_u8 => {
-                        const ms = bytecode[self.pc];
-                        self.pc += 1;
+                        const ms = try reader.readByte();
                         self.controller.handler.sleep(@intCast(ms));
                     },
 
                     .down => {
-                        const button_byte = bytecode[self.pc];
-                        self.pc += 1;
+                        const button_byte = try reader.readByte();
                         const button = mod.byteToButton(button_byte);
                         self.controller.pressButton(button, .down, false);
                     },
                     .down_combine => {
-                        const button_byte = bytecode[self.pc];
-                        self.pc += 1;
-                        const combine = self.pc < bytecode.len and
-                            bytecode[self.pc] == @intFromEnum(mod.command.CommandTag.down_combine);
+                        const button_byte = try reader.readByte();
+                        const combine = reader.hasNext() and
+                            try reader.peekByte() == @intFromEnum(mod.command.CommandTag.down_combine);
 
                         const button = mod.byteToButton(button_byte);
                         self.controller.pressButton(button, .down, combine);
                     },
 
                     .up => {
-                        const button_byte = bytecode[self.pc];
-                        self.pc += 1;
+                        const button_byte = try reader.readByte();
                         const button = mod.byteToButton(button_byte);
                         self.controller.pressButton(button, .up, false);
                     },
                     .up_combine => {
-                        const button_byte = bytecode[self.pc];
-                        self.pc += 1;
-                        const combine = self.pc < bytecode.len and
-                            bytecode[self.pc] == @intFromEnum(mod.command.CommandTag.up_combine);
+                        const button_byte = try reader.readByte();
+                        const combine = reader.hasNext() and
+                            try reader.peekByte() == @intFromEnum(mod.command.CommandTag.up_combine);
 
                         const button = mod.byteToButton(button_byte);
                         self.controller.pressButton(button, .up, combine);
                     },
 
                     .stick => {
-                        const stick_type: mod.StickType = @enumFromInt(bytecode[self.pc]);
-                        self.pc += 1;
-
-                        const x_u32 = std.mem.readInt(u32, bytecode[self.pc..][0..4], endian);
-                        self.pc += 4;
-                        const y_u32 = std.mem.readInt(u32, bytecode[self.pc..][0..4], endian);
-                        self.pc += 4;
-
-                        const x: f32 = @bitCast(x_u32);
-                        const y: f32 = @bitCast(y_u32);
+                        const stick_type: mod.StickType = try reader.readEnum(mod.StickType);
+                        const x: f32 = try reader.readFloat32();
+                        const y: f32 = try reader.readFloat32();
 
                         self.controller.setStick(stick_type, x, y);
                     },
 
                     .reset_stick => {
-                        const stick_type: mod.StickType = @enumFromInt(bytecode[self.pc]);
-                        self.pc += 1;
+                        const stick_type: mod.StickType = try reader.readEnum(mod.StickType);
                         self.controller.resetStick(stick_type);
                     },
 
                     .commands => {
                         try self.stack.push(.{
-                            .body_pc = self.pc,
+                            .body_pc = reader.pc,
                             .remaining_times = 0,
                         });
                     },
 
                     .repeat => {
-                        const times = std.mem.readInt(u32, bytecode[self.pc..][0..4], endian);
-                        self.pc += 5;
+                        const times = try reader.readInt(u32);
+                        try reader.skipBytes(1);
 
                         try self.stack.push(.{
-                            .body_pc = self.pc,
-                            .remaining_times = times - 1,
+                            .body_pc = reader.pc,
+                            .remaining_times = std.math.sub(u32, times, 1) catch 0,
                         });
                     },
                     .repeat_u16 => {
-                        const times = std.mem.readInt(u16, bytecode[self.pc..][0..2], endian);
-                        self.pc += 3;
+                        const times = try reader.readInt(u16);
+                        try reader.skipBytes(1);
 
                         try self.stack.push(.{
-                            .body_pc = self.pc,
-                            .remaining_times = times - 1,
+                            .body_pc = reader.pc,
+                            .remaining_times = std.math.sub(u32, times, 1) catch 0,
                         });
                     },
                     .repeat_u8 => {
-                        const times = bytecode[self.pc];
-                        self.pc += 2;
+                        const times = try reader.readByte();
+                        try reader.skipBytes(1);
 
                         try self.stack.push(.{
-                            .body_pc = self.pc,
-                            .remaining_times = times - 1,
+                            .body_pc = reader.pc,
+                            .remaining_times = std.math.sub(u32, times, 1) catch 0,
                         });
                     },
 
@@ -331,7 +406,7 @@ pub fn CommandRunner(comptime CallStack: type) type {
                     .end => {
                         if (self.stack.top()) |frame| {
                             if (frame.remaining_times > 0) {
-                                self.pc = frame.body_pc;
+                                try reader.setPC(frame.body_pc);
                                 frame.remaining_times -= 1;
                             } else {
                                 _ = self.stack.pop();
@@ -345,4 +420,28 @@ pub fn CommandRunner(comptime CallStack: type) type {
             }
         }
     };
+}
+
+const NothingHandler = struct {
+    const Self = @This();
+    pub fn send(_: *Self, _: mod.report.ReportType) !void {}
+
+    pub fn sleep(_: *Self, _: u32) void {}
+};
+pub fn byteCodeTest(allocator: std.mem.Allocator, bytecode: []const u8) !void {
+    var handler = NothingHandler{};
+    var controller = try mod.Controller.init(allocator, &handler, .{});
+    defer controller.deinit();
+
+    var runner = CommandRunner(CallStackAlloc){
+        .controller = controller,
+        .stack = .init(allocator),
+    };
+    defer runner.deinit();
+    try runner.runByteCode(bytecode);
+}
+
+test "check test" {
+    const bytecode = &[_]u8{ 0x01, 81, 61 };
+    try byteCodeTest(std.testing.allocator, bytecode);
 }

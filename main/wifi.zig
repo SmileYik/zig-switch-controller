@@ -99,7 +99,7 @@ pub const WifiManager = struct {
         try self.setAuth(.WIFI_MODE_STA, sta_auth);
         try idf.wifi.start();
 
-        log.info(
+        log.debug(
             "WiFi APSTA Manager initialized. AP: \"{s}\", Target STA: \"{s}\"",
             .{
                 ap_auth.ssid orelse "none",
@@ -189,7 +189,7 @@ pub const WifiManager = struct {
                 try idf.wifi.setConfig(.WIFI_IF_STA, &self.sta_config);
             },
             else => {
-                log.info("not support mode: {s}", .{@tagName(mode)});
+                log.debug("not support mode: {s}", .{@tagName(mode)});
             },
         }
     }
@@ -200,7 +200,7 @@ pub const WifiManager = struct {
 
         switch (event_id) {
             sys.WIFI_EVENT_STA_START => {
-                log.info("STA started, initiating connection...", .{});
+                log.debug("STA started, initiating connection...", .{});
                 idf.wifi.connect() catch |err| log.err("connect() failed: {s}", .{@errorName(err)});
             },
             sys.WIFI_EVENT_STA_DISCONNECTED => {
@@ -209,7 +209,7 @@ pub const WifiManager = struct {
             sys.WIFI_EVENT_AP_STACONNECTED => {
                 if (event_data) |data| {
                     const ev = @as(*sys.wifi_event_ap_staconnected_t, @ptrCast(@alignCast(data)));
-                    log.info("Client connected to AP, MAC: {x}:{x}:{x}:{x}:{x}:{x}", .{
+                    log.debug("Client connected to AP, MAC: {x}:{x}:{x}:{x}:{x}:{x}", .{
                         ev.mac[0], ev.mac[1], ev.mac[2], ev.mac[3], ev.mac[4], ev.mac[5],
                     });
                 }
@@ -217,7 +217,7 @@ pub const WifiManager = struct {
             sys.WIFI_EVENT_AP_STADISCONNECTED => {
                 if (event_data) |data| {
                     const ev = @as(*sys.wifi_event_ap_stadisconnected_t, @ptrCast(@alignCast(data)));
-                    log.info("Client left AP, MAC: {x}:{x}:{x}:{x}:{x}:{x}", .{
+                    log.debug("Client left AP, MAC: {x}:{x}:{x}:{x}:{x}:{x}", .{
                         ev.mac[0], ev.mac[1], ev.mac[2], ev.mac[3], ev.mac[4], ev.mac[5],
                     });
                 }
@@ -232,7 +232,7 @@ pub const WifiManager = struct {
         if (event_id == sys.IP_EVENT_STA_GOT_IP) {
             const ev = @as(*sys.ip_event_got_ip_t, @ptrCast(@alignCast(event_data)));
             const ip = ev.ip_info.ip.addr;
-            log.info("STA Got IP: {}.{}.{}.{}", .{
+            log.debug("STA Got IP: {}.{}.{}.{}", .{
                 @as(u8, @truncate(ip)),
                 @as(u8, @truncate(ip >> 8)),
                 @as(u8, @truncate(ip >> 16)),

@@ -260,7 +260,7 @@ inline fn callHIDDHandler(self: *Self, event: HIDDEvent) void {
 }
 
 pub fn sendReport(self: *Self, data: []u8) !void {
-    log.info("send report [len={d}]: {x}", .{ data.len, data });
+    log.debug("send report [len={d}]: {x}", .{ data.len, data });
     if (data.len <= self.send_report_offset + 1) {
         return BTError.SendWrongReport;
     }
@@ -309,7 +309,7 @@ export fn hiddCallback(
     if (INSTANCE) |ins| {
         switch (event) {
             sys.ESP_HIDD_INIT_EVT => {
-                log.info("[HIDD] [INIT] prepare to init", .{});
+                log.debug("[HIDD] [INIT] prepare to init", .{});
                 errors.espCheckError(sys.esp_bt_hid_device_register_app(
                     @constCast(&ins.hidd_app_param),
                     @constCast(&ins.hidd_qos_in),
@@ -321,13 +321,13 @@ export fn hiddCallback(
             },
 
             sys.ESP_HIDD_REGISTER_APP_EVT => {
-                log.info("[HIDD] [REGISTER_APP] wating for paring", .{});
+                log.debug("[HIDD] [REGISTER_APP] wating for paring", .{});
                 ins.enablePairing() catch {};
                 ins.callHIDDHandler(.{ .register_app = if (param == null) null else &param.*.register_app });
             },
 
             sys.ESP_HIDD_OPEN_EVT => {
-                log.info("[HIDD] [OPEN] connecting", .{});
+                log.debug("[HIDD] [OPEN] connecting", .{});
 
                 ins.callHIDDHandler(.{ .open = if (param == null) null else &param.*.open });
             },
@@ -345,7 +345,7 @@ export fn hiddCallback(
                 if (builtin.mode == .Debug) {
                     if (param != null and param.*.intr_data.data != null) {
                         const intr = param.*.intr_data;
-                        log.info(
+                        log.debug(
                             "[HIDD] [INTR] [len={d}] [id={x}]: {x}",
                             .{
                                 intr.len,
@@ -371,7 +371,7 @@ export fn gapCallback(
 ) callconv(.c) void {
     switch (event) {
         sys.ESP_BT_GAP_CFM_REQ_EVT => {
-            log.info("[GAP] [ESP_BT_GAP_CFM_REQ_EVT] Accepted!", .{});
+            log.debug("[GAP] [ESP_BT_GAP_CFM_REQ_EVT] Accepted!", .{});
             errors.espCheckError(sys.esp_bt_gap_ssp_confirm_reply(&param.*.cfm_req.bda[0], true)) catch |e| {
                 log.err("[GAP] [ESP_BT_GAP_CFM_REQ_EVT] auto accept failed: {s}", .{@errorName(e)});
             };
@@ -379,14 +379,14 @@ export fn gapCallback(
 
         sys.ESP_BT_GAP_AUTH_CMPL_EVT => {
             if (param.*.auth_cmpl.stat == sys.ESP_BT_STATUS_SUCCESS) {
-                log.info("[GAP] [ESP_BT_GAP_AUTH_CMPL_EVT] auth success！", .{});
+                log.debug("[GAP] [ESP_BT_GAP_AUTH_CMPL_EVT] auth success！", .{});
             } else {
                 log.warn("[GAP] [ESP_BT_GAP_AUTH_CMPL_EVT] auth status: {d}", .{param.*.auth_cmpl.stat});
             }
         },
 
         sys.ESP_BT_GAP_PIN_REQ_EVT => {
-            log.info("[GAP] [ESP_BT_GAP_PIN_REQ_EVT] Requesting PIN, responsing 0000...", .{});
+            log.debug("[GAP] [ESP_BT_GAP_PIN_REQ_EVT] Requesting PIN, responsing 0000...", .{});
             var pin_code = [_]u8{ '0', '0', '0', '0' };
             errors.espCheckError(sys.esp_bt_gap_pin_reply(
                 &param.*.pin_req.bda[0],

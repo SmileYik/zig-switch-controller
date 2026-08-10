@@ -1,11 +1,15 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{
+    var target = b.standardTargetOptions(.{
         .whitelist = espressif_targets,
         .default_target = espressif_targets[0],
     });
     const optimize = b.standardOptimizeOption(.{});
+
+    target.query.cpu_features_add.addFeature(
+        @intFromEnum(std.Target.xtensa.Feature.text_section_literals),
+    );
 
     const esp_idf_mod = idf_wrapped_modules(b);
 

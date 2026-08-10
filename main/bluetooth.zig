@@ -372,7 +372,8 @@ export fn gapCallback(
     switch (event) {
         sys.ESP_BT_GAP_CFM_REQ_EVT => {
             log.debug("[GAP] [ESP_BT_GAP_CFM_REQ_EVT] Accepted!", .{});
-            errors.espCheckError(sys.esp_bt_gap_ssp_confirm_reply(&param.*.cfm_req.bda[0], true)) catch |e| {
+            const bda = &param.*.cfm_req.bda;
+            errors.espCheckError(sys.esp_bt_gap_ssp_confirm_reply(@ptrCast(@alignCast(bda)), true)) catch |e| {
                 log.err("[GAP] [ESP_BT_GAP_CFM_REQ_EVT] auto accept failed: {s}", .{@errorName(e)});
             };
         },
@@ -389,7 +390,7 @@ export fn gapCallback(
             log.debug("[GAP] [ESP_BT_GAP_PIN_REQ_EVT] Requesting PIN, responsing 0000...", .{});
             var pin_code = [_]u8{ '0', '0', '0', '0' };
             errors.espCheckError(sys.esp_bt_gap_pin_reply(
-                &param.*.pin_req.bda[0],
+                @ptrCast(@alignCast(&param.*.pin_req.bda)),
                 true,
                 4,
                 &pin_code[0],

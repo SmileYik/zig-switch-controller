@@ -36,11 +36,26 @@ const ReportSender = struct {
 
 const Runner = mod.controller.command.runner.CommandRunner(mod.controller.command.runner.CallStackAlloc);
 
+const A = struct {
+    a: i8 = -1,
+};
+
+const B = struct {
+    a: []const u8 = "Hello",
+    b: [32]u8 = std.mem.zeroes([32]u8),
+};
+
+const E = enum(u8) {
+    a = 0x01,
+    b_b = 0x10,
+};
+
 // ---------------------------------------------------------------------------
 // 6. 初始化与 app_main
 // ---------------------------------------------------------------------------
 export fn app_main() callconv(.c) void {
     var heap = idf.heap.HeapCapsAllocator.init(.{ .@"8bit" = true });
+
     var arena = std.heap.ArenaAllocator.init(heap.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -49,6 +64,23 @@ export fn app_main() callconv(.c) void {
         log.err("NVS 初始化失败: {s}", .{@errorName(err)});
         return;
     };
+
+    // const a = mod.config.loadStruct(allocator, "test", A) catch |err| {
+    //     log.err("NVS loadStruct A: {s}", .{@errorName(err)});
+    //     return;
+    // };
+    // log.info("---A: {any}", .{a});
+    const b: A = .{ .a = -16 };
+    // b.sb.b[5] = 0x05;
+    mod.config.storeStruct("test2", b) catch |err| {
+        log.err("NVS storeStruct A: {s}", .{@errorName(err)});
+        return;
+    };
+    const c = mod.config.loadStruct(allocator, "test2", A) catch |err| {
+        log.err("NVS loadStruct C: {s}", .{@errorName(err)});
+        return;
+    };
+    log.info("---C: {any}", .{c});
 
     var queue = mod.ReportQueue.init(
         allocator,
@@ -122,182 +154,191 @@ export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
 }
 
 const SCRIPT =
-    \\REPEAT 4294967294
-    \\
     \\  REPEAT 5
     \\    DOWN R L
     \\    WAIT 66ms
     \\    UP R L
     \\    WAIT 66ms
     \\  END
-    \\
-    \\  WAIT 10s
-    \\
-    \\  REPEAT 1
-    \\    DOWN A
-    \\    WAIT 66ms
-    \\    UP A
-    \\    WAIT 66ms
-    \\  END
-    \\
-    \\  WAIT 20s
-    \\
-    \\REPEAT 3
-    \\  DOWN ZR
-    \\  WAIT 66ms
-    \\  UP ZR
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN R
-    \\  WAIT 66ms
-    \\  UP R
-    \\END
-    \\WAIT 1s
-    \\
-    // \\REPEAT 3
-    // \\  DOWN JCL_SL
-    // \\  WAIT 66ms
-    // \\  UP JCL_SL
-    // \\END
-    // \\WAIT 1s
-    // \\
-    // \\REPEAT 3
-    // \\  DOWN JCL_SR
-    // \\  WAIT 66ms
-    // \\  UP JCL_SR
-    // \\END
-    // \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN A
-    \\  WAIT 66ms
-    \\  UP A
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN B
-    \\  WAIT 66ms
-    \\  UP B
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN X
-    \\  WAIT 66ms
-    \\  UP X
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN Y
-    \\  WAIT 66ms
-    \\  UP Y
-    \\END
-    \\WAIT 1s
-    \\
-    // \\REPEAT 3
-    // \\  DOWN CAPTURE
-    // \\  WAIT 66ms
-    // \\  UP CAPTURE
-    // \\END
-    // \\WAIT 1s
-    \\
-    // \\REPEAT 3
-    // \\  DOWN HOME
-    // \\  WAIT 66ms
-    // \\  UP HOME
-    // \\END
-    // \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN L_STICK_PRESSED
-    \\  WAIT 66ms
-    \\  UP L_STICK_PRESSED
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN R_STICK_PRESSED
-    \\  WAIT 66ms
-    \\  UP R_STICK_PRESSED
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN PLUS
-    \\  WAIT 66ms
-    \\  UP PLUS
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN MINUS
-    \\  WAIT 66ms
-    \\  UP MINUS
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN ZL
-    \\  WAIT 66ms
-    \\  UP ZL
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN L
-    \\  WAIT 66ms
-    \\  UP L
-    \\END
-    \\WAIT 1s
-    \\
-    // \\REPEAT 3
-    // \\  DOWN JCR_SL
-    // \\  WAIT 66ms
-    // \\  UP JCR_SL
-    // \\END
-    // \\WAIT 1s
-    // \\
-    // \\REPEAT 3
-    // \\  DOWN JCR_SR
-    // \\  WAIT 66ms
-    // \\  UP JCR_SR
-    // \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN DPAD_LEFT
-    \\  WAIT 66ms
-    \\  UP DPAD_LEFT
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN DPAD_RIGHT
-    \\  WAIT 66ms
-    \\  UP DPAD_RIGHT
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN DPAD_UP
-    \\  WAIT 66ms
-    \\  UP DPAD_UP
-    \\END
-    \\WAIT 1s
-    \\
-    \\REPEAT 3
-    \\  DOWN DPAD_DOWN
-    \\  WAIT 66ms
-    \\  UP DPAD_DOWN
-    \\END
-    \\
-    \\END
-    \\
 ;
+
+// const SCRIPT =
+//     \\REPEAT 4294967294
+//     \\
+//     \\  REPEAT 5
+//     \\    DOWN R L
+//     \\    WAIT 66ms
+//     \\    UP R L
+//     \\    WAIT 66ms
+//     \\  END
+//     \\
+//     \\  WAIT 10s
+//     \\
+//     \\  REPEAT 1
+//     \\    DOWN A
+//     \\    WAIT 66ms
+//     \\    UP A
+//     \\    WAIT 66ms
+//     \\  END
+//     \\
+//     \\  WAIT 20s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN ZR
+//     \\  WAIT 66ms
+//     \\  UP ZR
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN R
+//     \\  WAIT 66ms
+//     \\  UP R
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     // \\REPEAT 3
+//     // \\  DOWN JCL_SL
+//     // \\  WAIT 66ms
+//     // \\  UP JCL_SL
+//     // \\END
+//     // \\WAIT 1s
+//     // \\
+//     // \\REPEAT 3
+//     // \\  DOWN JCL_SR
+//     // \\  WAIT 66ms
+//     // \\  UP JCL_SR
+//     // \\END
+//     // \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN A
+//     \\  WAIT 66ms
+//     \\  UP A
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN B
+//     \\  WAIT 66ms
+//     \\  UP B
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN X
+//     \\  WAIT 66ms
+//     \\  UP X
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN Y
+//     \\  WAIT 66ms
+//     \\  UP Y
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     // \\REPEAT 3
+//     // \\  DOWN CAPTURE
+//     // \\  WAIT 66ms
+//     // \\  UP CAPTURE
+//     // \\END
+//     // \\WAIT 1s
+//     \\
+//     // \\REPEAT 3
+//     // \\  DOWN HOME
+//     // \\  WAIT 66ms
+//     // \\  UP HOME
+//     // \\END
+//     // \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN L_STICK_PRESSED
+//     \\  WAIT 66ms
+//     \\  UP L_STICK_PRESSED
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN R_STICK_PRESSED
+//     \\  WAIT 66ms
+//     \\  UP R_STICK_PRESSED
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN PLUS
+//     \\  WAIT 66ms
+//     \\  UP PLUS
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN MINUS
+//     \\  WAIT 66ms
+//     \\  UP MINUS
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN ZL
+//     \\  WAIT 66ms
+//     \\  UP ZL
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN L
+//     \\  WAIT 66ms
+//     \\  UP L
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     // \\REPEAT 3
+//     // \\  DOWN JCR_SL
+//     // \\  WAIT 66ms
+//     // \\  UP JCR_SL
+//     // \\END
+//     // \\WAIT 1s
+//     // \\
+//     // \\REPEAT 3
+//     // \\  DOWN JCR_SR
+//     // \\  WAIT 66ms
+//     // \\  UP JCR_SR
+//     // \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN DPAD_LEFT
+//     \\  WAIT 66ms
+//     \\  UP DPAD_LEFT
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN DPAD_RIGHT
+//     \\  WAIT 66ms
+//     \\  UP DPAD_RIGHT
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN DPAD_UP
+//     \\  WAIT 66ms
+//     \\  UP DPAD_UP
+//     \\END
+//     \\WAIT 1s
+//     \\
+//     \\REPEAT 3
+//     \\  DOWN DPAD_DOWN
+//     \\  WAIT 66ms
+//     \\  UP DPAD_DOWN
+//     \\END
+//     \\
+//     \\END
+//     \\
+// ;
 
 pub const panic = idf.esp_panic.panic;
 pub const std_options: std.Options = .{

@@ -50,6 +50,47 @@ export fn app_main() callconv(.c) void {
         return;
     };
 
+    // load wifi
+    var wifi_config = mod.config.loadStruct(
+        allocator,
+        "wf",
+        mod.Configuration.WifiConfig,
+    ) catch blk: {
+        var default = mod.Configuration.WifiConfig{};
+        default.sta.ssid = "gczjzx";
+        default.sta.pwd = "88888888";
+        break :blk mod.config.DefaultConfig(default);
+    };
+    var wifi = mod.wifi.WifiManager.init(
+        allocator,
+        &.{ .ssid = wifi_config.config.ap.ssid, .password = wifi_config.config.ap.pwd },
+        &.{ .ssid = wifi_config.config.sta.ssid, .password = wifi_config.config.sta.pwd },
+    ) catch |err| {
+        log.err("Wifi 初始化失败: {s}", .{@errorName(err)});
+        return;
+    };
+    defer wifi.deinit();
+    defer wifi.stopWifi() catch |err| {
+        log.err("Wifi 关闭失败: {s}", .{@errorName(err)});
+    };
+    wifi.startWifi() catch |err| {
+        log.err("Wifi 开启失败: {s}", .{@errorName(err)});
+    };
+    _ = wifi.waitForConnect(60000);
+    wifi_config.deinit();
+
+    var http_srv = mod.http.init();
+    defer http_srv.stop() catch |err| {
+        log.err("Http Server 关闭失败: {s}", .{@errorName(err)});
+    };
+    http_srv.start() catch |err| {
+        log.err("Http Server 开启失败: {s}", .{@errorName(err)});
+    };
+    var http_action = mod.http_action.init(allocator);
+    http_srv.registerUris(http_action.getUris()) catch |err| {
+        log.err("Http action 注册失败: {s}", .{@errorName(err)});
+    };
+
     var queue = mod.ReportQueue.init(
         allocator,
         .{ .protocol = protocol },

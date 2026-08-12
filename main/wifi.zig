@@ -172,7 +172,7 @@ pub const WifiManager = struct {
                 }
                 if (auth.password) |password| {
                     copyZ(&self.ap_config.ap.password, password[0..]);
-                    self.ap_config.ap.authmode = if (password.len == 0)
+                    self.ap_config.ap.authmode = if (password.len < 8)
                         sys.WIFI_AUTH_OPEN
                     else
                         sys.WIFI_AUTH_WPA2_PSK;
@@ -184,7 +184,8 @@ pub const WifiManager = struct {
                     copyZ(&self.sta_config.sta.ssid, ssid[0..]);
                 }
                 if (auth.password) |password| {
-                    copyZ(&self.sta_config.sta.password, password[0..]);
+                    if (password.len >= 8)
+                        copyZ(&self.sta_config.sta.password, password[0..]);
                 }
                 try idf.wifi.setConfig(.WIFI_IF_STA, &self.sta_config);
             },

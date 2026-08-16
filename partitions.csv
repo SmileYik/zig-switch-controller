@@ -4,6 +4,6 @@
 # Name,    Type, SubType,  Offset,  Size,  Flags
 nvs,       data, nvs,      ,        0x6000,
 phy_init,  data, phy,      ,        0x1000,
-factory,   app,  factory,  ,        0x300000,
+factory,   app,  factory,  ,        0x1D0000,
 nvs_keys,  data, nvs_keys, ,        0x1000,
 fctry,     data, nvs,      ,        0x6000,

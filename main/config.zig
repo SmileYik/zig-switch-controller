@@ -160,6 +160,103 @@ pub fn storeEnum(
     try storeInt(handle, name, @as(type_info.@"enum".tag_type, @intFromEnum(value)));
 }
 
+pub fn loadStructArray(
+    allocator: Allocator,
+    comptime T: type,
+    handle: u32,
+    comptime name: [:0]const u8,
+) ![]T {
+    checkKeyLen(name);
+
+    const type_info = @typeInfo(T);
+    if (type_info != .array) @compileError("Only support array type");
+    const len = type_info.array.len;
+    const child_type = type_info.array.child;
+    if (@typeInfo(child_type) != .@"struct") @compileError("Only support struct array type");
+
+    if (len == 0) return &[0]child_type{};
+    var array: [len]child_type = undefined;
+
+    inline for (0..len) |i| {
+        const key = std.fmt.comptimePrint("{s}.{d}", .{ name, i });
+        array[i] = loadStructInner(allocator, handle, key, child_type) catch undefined;
+    }
+
+    return array;
+}
+
+pub fn storeStructArray(
+    handle: u32,
+    comptime name: [:0]const u8,
+    value: anytype,
+) !void {
+    checkKeyLen(name);
+
+    const T = @TypeOf(value);
+    const type_info = @typeInfo(T);
+    if (type_info != .array) @compileError("Only support array type");
+    const len = type_info.array.len;
+    const child_type = type_info.array.child;
+    if (@typeInfo(child_type) != .@"struct") @compileError("Only support struct array type");
+
+    if (len == 0) return;
+
+    inline for (0..len) |i| {
+        const key = std.fmt.comptimePrint("{s}.{d}", .{ name, i });
+        try storeStructInner(handle, key, value[i]);
+    }
+}
+
+pub fn loadStructSlice(
+    allocator: Allocator,
+    comptime T: type,
+    handle: u32,
+    comptime name: [:0]const u8,
+) ![]T {
+    checkKeyLen(name);
+
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") @compileError("Only support struct type");
+
+    const len_key = std.fmt.comptimePrint("{s}.LEN", .{name});
+    const size = try loadInt(u8, handle, len_key);
+    if (size == 0) return &[0]T{};
+
+    var slice: []T = try allocator.alloc(T, size);
+    errdefer allocator.free(slice);
+
+    inline for (0..255) |i| {
+        if (i >= size) return slice;
+        const key = std.fmt.comptimePrint("{s}.{d}", .{ name, i });
+        slice[i] = try loadStructInner(allocator, handle, key, T);
+    }
+
+    return slice;
+}
+
+pub fn storeStructSlice(
+    handle: u32,
+    comptime name: [:0]const u8,
+    value: anytype,
+) !void {
+    checkKeyLen(name);
+
+    const T = @TypeOf(value);
+    const type_info = @typeInfo(T);
+    if (type_info != .pointer) @compileError("Only struct slice struct type");
+    const child_type = @typeInfo(type_info.pointer.child);
+    if (@typeInfo(child_type) != .@"struct") @compileError("Only support struct slice type");
+
+    const len_key = std.fmt.comptimePrint("{s}.LEN", .{name});
+    try storeInt(u8, len_key, value.len);
+
+    inline for (0..255) |i| {
+        if (i >= value.len) return;
+        const key = std.fmt.comptimePrint("{s}.{d}", .{ name, i });
+        try storeStructInner(handle, key, value[i]);
+    }
+}
+
 pub fn loadStructInner(
     allocator: Allocator,
     handle: u32,
@@ -187,7 +284,7 @@ pub fn loadStructInner(
                     var buf: [array.len]u8 = std.mem.zeroes([array.len]u8);
                     try nvs.getBlob(handle, name, @ptrCast(&buf), &buf_len);
                     break :blk buf;
-                } else @compileError("not support this array type");
+                } else break :blk try loadStructArray(allocator, field.type, handle, name);
             },
             .pointer => |p| blk: {
                 if (p.child == u8) {
@@ -197,7 +294,7 @@ pub fn loadStructInner(
                     try nvs.getBlob(handle, name, @ptrCast(buf[0..]), &buf_len);
                     break :blk buf;
                 } else {
-                    @compileError("not support this array type");
+                    break :blk try loadStructSlice(allocator, p.child, handle, name);
                 }
             },
             .@"enum" => try loadEnum(field.type, handle, name),
@@ -234,14 +331,14 @@ pub fn storeStructInner(
                 if (array.child == u8) {
                     const str: []const u8 = f[0..];
                     try nvs.setBlob(handle, name, str);
-                } else @compileError("not support this array type");
+                } else try storeStructArray(handle, name, f);
             },
             .pointer => |p| {
                 if (p.child == u8) {
                     const str: []const u8 = f[0..];
                     try nvs.setBlob(handle, name, str);
                 } else {
-                    @compileError("not support this array type");
+                    try storeStructSlice(handle, name, f);
                 }
             },
             .@"enum" => try storeEnum(handle, name, f),
@@ -250,9 +347,36 @@ pub fn storeStructInner(
     }
 }
 
-pub fn loadStruct(allocator: Allocator, comptime namespace: [*:0]const u8, comptime T: type) !T {
+pub fn LoadedConfig(comptime T: type) type {
+    return struct {
+        allocator: ?std.heap.ArenaAllocator = null,
+        config: T,
+
+        pub fn deinit(self: *@This()) void {
+            if (self.allocator != null)
+                self.allocator.?.deinit();
+        }
+    };
+}
+
+pub fn DefaultConfig(config: anytype) LoadedConfig(@TypeOf(config)) {
+    return LoadedConfig(@TypeOf(config)){
+        .config = config,
+    };
+}
+
+pub fn loadStruct(
+    allocator: Allocator,
+    comptime namespace: [*:0]const u8,
+    comptime T: type,
+) !LoadedConfig(T) {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    const alloc = arena.allocator();
+    errdefer arena.deinit();
+
     const handle = try nvs.open(namespace, .read_only);
-    return try loadStructInner(allocator, handle, namespace, T);
+    const result = try loadStructInner(alloc, handle, namespace, T);
+    return .{ .allocator = arena, .config = result };
 }
 
 pub fn storeStruct(

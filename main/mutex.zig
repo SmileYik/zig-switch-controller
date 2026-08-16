@@ -31,7 +31,10 @@ pub fn lock(self: *Mutex) MutexError!void {
 }
 
 pub fn lockUncancelable(self: *Mutex) void {
-    while (!self.tryLock(1000)) {}
+    while (true) {
+        self.lock() catch continue;
+        break;
+    }
 }
 
 pub fn tryLock(self: *Mutex, wait_ms: u32) bool {

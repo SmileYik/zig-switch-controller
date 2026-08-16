@@ -11,6 +11,52 @@ pub export fn __udivti3(a: u128, b: u128) u128 {
     return a / b;
 }
 
+// 128位浮点数 (f128) 算术与转换函数
+pub export fn roundq(a: f128) callconv(.c) f128 {
+    return @round(a);
+}
+
+pub export fn __multf3(a: f128, b: f128) callconv(.c) f128 {
+    return a * b;
+}
+
+pub export fn __divtf3(a: f128, b: f128) callconv(.c) f128 {
+    return a / b;
+}
+
+pub export fn __fixtfti(a: f128) callconv(.c) i128 {
+    return @intFromFloat(a);
+}
+
+pub export fn __floatuntitf(a: u128) callconv(.c) f128 {
+    return @floatFromInt(a);
+}
+
+// 128位浮点数比较函数 (符合 GCC libgcc ABI)
+pub export fn __netf2(a: f128, b: f128) callconv(.c) i32 {
+    return if (a != b) 1 else 0;
+}
+
+pub export fn __gttf2(a: f128, b: f128) callconv(.c) i32 {
+    return if (a > b) 1 else if (a == b) 0 else -1;
+}
+
+pub export fn __lttf2(a: f128, b: f128) callconv(.c) i32 {
+    return if (a < b) -1 else if (a == b) 0 else 1;
+}
+
+pub export fn __letf2(a: f128, b: f128) callconv(.c) i32 {
+    return if (a <= b) 0 else 1;
+}
+
+pub export fn __getf2(a: f128, b: f128) callconv(.c) i32 {
+    return if (a >= b) 0 else -1;
+}
+
+pub export fn __eqtf2(a: f128, b: f128) callconv(.c) i32 {
+    return if (a == b) 0 else 1;
+}
+
 fn checkKeyLen(comptime name: [:0]const u8) void {
     if (name.len > MAX_KEY_LEN) {
         @compileError("NVS Key too long!");

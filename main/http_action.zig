@@ -8,7 +8,7 @@ const log = std.log.scoped(.http_action);
 const Self = @This();
 
 allocator: std.mem.Allocator,
-uris: [2]mod.http.Uri = [_]mod.http.Uri{
+uris: [5]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -19,6 +19,24 @@ uris: [2]mod.http.Uri = [_]mod.http.Uri{
         .uri = "/api/config/wifi",
         .method = sys.HTTP_GET,
         .handler = &getWifiConfig,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/config/wifi",
+        .method = sys.HTTP_POST,
+        .handler = &postWifiConfig,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/command/compile/base64",
+        .method = sys.HTTP_POST,
+        .handler = &postCommandCompileBase64,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/command/compile/hex",
+        .method = sys.HTTP_POST,
+        .handler = &postCommandCompileHex,
         .user_ctx = null,
     },
 },
@@ -62,9 +80,7 @@ export fn getWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
         mod.config.DefaultConfig(mod.Configuration.WifiConfig{});
     defer loaded.deinit();
 
-    self.sendStructAsJson(req, loaded.config, null) catch |e| {
-        self.sendError(req, "getWifiConfig", e);
-    };
+    self.sendStructAsJson(req, loaded.config, null);
     return sys.ESP_OK;
 }
 
@@ -72,23 +88,93 @@ export fn getWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
 export fn postWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var loaded = mod.config.loadStruct(
-        self.allocator,
-        @tagName(mod.Configuration.Keys.wf),
-        mod.Configuration.WifiConfig,
-    ) catch
-        mod.config.DefaultConfig(mod.Configuration.WifiConfig{});
-    defer loaded.deinit();
+    var array_opt = self.readBody(self.allocator, req);
+    if (array_opt) |*body| {
+        defer body.deinit(self.allocator);
 
-    self.sendStructAsJson(req, loaded.config, null) catch |e| {
-        self.sendError(req, "getWifiConfig", e);
-    };
+        var parsed = std.json.parseFromSlice(
+            mod.Configuration.WifiConfig,
+            self.allocator,
+            body.items,
+            .{ .ignore_unknown_fields = true },
+        ) catch |e| {
+            self.sendError(req, "parsed-body-failed", e);
+            return sys.ESP_FAIL;
+        };
+        defer parsed.deinit();
+
+        mod.config.storeStruct(@tagName(mod.Configuration.Keys.wf), parsed.value) catch |e| {
+            self.sendError(req, "store-wifi-config-failed", e);
+            return sys.ESP_FAIL;
+        };
+        self.sendStructAsJson(req, " ", "configurate wifi success");
+    } else {
+        self.sendJsonError(req, 500, "request body is empty");
+    }
+    return sys.ESP_OK;
+}
+
+/// POST /api/command/compile/base64
+export fn postCommandCompileBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var array_opt = self.readBody(self.allocator, req);
+    if (array_opt) |*body| {
+        defer body.deinit(self.allocator);
+
+        log.debug("compile command to base64: {s}", .{body.items});
+
+        var opt = mod.controller.command.compileToBase64(
+            self.allocator,
+            body.items[0..body.items.len],
+        ) catch |e| {
+            self.sendError(req, "compile-script-to-base64-failed", e);
+            return sys.ESP_FAIL;
+        };
+        if (opt) |*base64| {
+            defer self.allocator.free(base64.*);
+            self.sendStructAsJson(req, base64, "finished compiled");
+        } else {
+            self.sendJsonError(req, 500, "can not compile to bytecode");
+        }
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
+    return sys.ESP_OK;
+}
+
+/// POST /api/command/compile/hex
+export fn postCommandCompileHex(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var array_opt = self.readBody(self.allocator, req);
+    if (array_opt) |*body| {
+        defer body.deinit(self.allocator);
+
+        log.debug("compile command to hex: {s}", .{body.items});
+
+        var opt = mod.controller.command.compileToHex(
+            self.allocator,
+            body.items[0..body.items.len],
+        ) catch |e| {
+            self.sendError(req, "compile-script-to-hex-failed", e);
+            return sys.ESP_FAIL;
+        };
+        if (opt) |*base64| {
+            defer self.allocator.free(base64.*);
+            self.sendStructAsJson(req, base64, "finished compiled");
+        } else {
+            self.sendJsonError(req, 500, "can not compile to bytecode");
+        }
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
     return sys.ESP_OK;
 }
 
 fn Result(comptime T: type) type {
     return struct {
-        code: u16 = 200,
+        code: u16,
         data: ?T = null,
         msg: ?[]const u8 = null,
     };
@@ -138,11 +224,34 @@ fn sendError(
     };
 }
 
+fn sendJsonError(
+    self: *Self,
+    req: [*c]mod.http.Req,
+    comptime code: u16,
+    comptime msg: ?[]const u8,
+) void {
+    self.sendStructAsJsonInner(req, code, ' ', msg) catch |e| {
+        self.sendError(req, "send-json-error-failed", e);
+    };
+}
+
 fn sendStructAsJson(
     self: *Self,
     req: [*c]mod.http.Req,
     value: anytype,
-    message: ?[]const u8,
+    comptime message: ?[]const u8,
+) void {
+    self.sendStructAsJsonInner(req, 200, value, message) catch |e| {
+        self.sendError(req, "send-json-error-failed", e);
+    };
+}
+
+fn sendStructAsJsonInner(
+    self: *Self,
+    req: [*c]mod.http.Req,
+    comptime code: u16,
+    value: anytype,
+    comptime message: ?[]const u8,
 ) !void {
     const T = @TypeOf(value);
     const R = Result(T);
@@ -151,6 +260,7 @@ fn sendStructAsJson(
         "{f}",
         .{
             std.json.fmt(R{
+                .code = code,
                 .data = value,
                 .msg = message,
             }, .{}),
@@ -161,4 +271,26 @@ fn sendStructAsJson(
 
     try idf.http.Server.Response.setHDR(req, "content-type", "application/json");
     try idf.http.Server.Response.sendStr(req, json);
+}
+
+fn readBody(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    req: [*c]mod.http.Req,
+) ?std.ArrayList(u8) {
+    var buf: [1024]u8 = undefined;
+    var array: std.ArrayList(u8) = .empty;
+    errdefer array.deinit(allocator);
+
+    while (true) {
+        const len = idf.http.Server.Request.receiver(req, &buf, buf.len);
+        if (len > 0) {
+            array.appendSlice(allocator, buf[0..@as(usize, @intCast(len))]) catch |e| {
+                self.sendError(req, "Read-body-failed", e);
+                defer array.deinit(allocator);
+                return null;
+            };
+        } else break;
+    }
+    return array;
 }

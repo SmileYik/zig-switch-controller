@@ -424,16 +424,67 @@ pub fn CommandRunner(comptime CallStack: type) type {
 
 const NothingHandler = struct {
     const Self = @This();
-    pub fn send(_: *Self, _: mod.report.ReportType) !void {}
+    pub fn send(_: *Self, _: @import("report").ReportType) !void {}
 
     pub fn sleep(_: *Self, _: u32) void {}
 };
+const CallStackAllocTest = struct {
+    const Self = @This();
+
+    stack: CallStackAlloc,
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .stack = .{
+                .allocator = allocator,
+                .items = .empty,
+            },
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.stack.deinit();
+    }
+
+    pub fn push(self: *Self, frame: StackFrame) !void {
+        try self.stack.push(.{
+            .body_pc = frame.body_pc,
+            .remaining_times = 0,
+        });
+    }
+
+    pub fn top(self: *Self) ?*StackFrame {
+        return self.stack.top();
+    }
+
+    pub fn pop(self: *Self) ?StackFrame {
+        return self.stack.pop();
+    }
+
+    pub fn len(self: *const Self) usize {
+        return self.stack.len();
+    }
+
+    pub fn capacity(self: *const Self) usize {
+        return self.stack.capacity();
+    }
+
+    pub fn isEmpty(self: *const Self) bool {
+        return self.stack.isEmpty();
+    }
+
+    pub fn clear(self: *Self) void {
+        return self.stack.clear();
+    }
+};
+
+/// test byte code. if included `repeat` command, will set repeat times forced to 0.
 pub fn byteCodeTest(allocator: std.mem.Allocator, bytecode: []const u8) !void {
     var handler = NothingHandler{};
     var controller = try mod.Controller.init(allocator, &handler, .{});
     defer controller.deinit();
 
-    var runner = CommandRunner(CallStackAlloc){
+    var runner = CommandRunner(CallStackAllocTest){
         .controller = controller,
         .stack = .init(allocator),
     };

@@ -56,9 +56,9 @@ const E = enum(u8) {
 export fn app_main() callconv(.c) void {
     var heap = idf.heap.HeapCapsAllocator.init(.{ .@"8bit" = true });
 
-    var arena = std.heap.ArenaAllocator.init(heap.allocator());
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    // var arena = std.heap.ArenaAllocator.init(heap.allocator());
+    // defer arena.deinit();
+    const allocator = heap.allocator();
 
     idf.nvs.flashInitOrErase() catch |err| {
         log.err("NVS 初始化失败: {s}", .{@errorName(err)});

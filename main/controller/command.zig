@@ -114,3 +114,36 @@ fn deinitCommand(allocator: std.mem.Allocator, command: *Command) void {
         else => {},
     }
 }
+
+pub fn compile(allocator: std.mem.Allocator, script: []const u8) !?std.ArrayList(u8) {
+    var opt = try parser.parseCommand(allocator, script);
+    if (opt) |*pack| {
+        defer pack.deinit();
+        const array = try compiler.compile(allocator, pack, .little);
+        try runner.byteCodeTest(allocator, array.items);
+        return array;
+    }
+    return null;
+}
+
+pub fn compileToHex(allocator: std.mem.Allocator, script: []const u8) !?[]const u8 {
+    var opt = try compile(allocator, script);
+    if (opt) |*bytes| {
+        defer bytes.deinit(allocator);
+        return try std.fmt.allocPrint(allocator, "{x}", .{bytes.items});
+    }
+    return null;
+}
+
+pub fn compileToBase64(allocator: std.mem.Allocator, script: []const u8) !?[]const u8 {
+    var opt = try compile(allocator, script);
+    if (opt) |*bytecode| {
+        defer bytecode.deinit(allocator);
+
+        const enc = std.base64.url_safe.Encoder;
+        const size = enc.calcSize(bytecode.items.len);
+        const base64_bytecode = try allocator.alloc(u8, size);
+        return enc.encode(base64_bytecode, bytecode.items);
+    }
+    return null;
+}

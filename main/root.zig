@@ -36,8 +36,8 @@ pub const Configuration = struct {
         };
 
         auto_start: bool = false,
-        idx: usize = 0,
-        len: usize = 0,
+        idx: u32 = 0,
+        len: u32 = 0,
         cmds: []Entry = undefined,
     };
 };

@@ -63,10 +63,7 @@ pub fn compileCommand(
             .stick => |s| {
                 try writer.append(allocator, @intFromEnum(CommandTag.stick));
                 try writer.append(allocator, @intFromEnum(s.stick));
-                var buf: [8]u8 = undefined;
-                std.mem.writeInt(u32, buf[0..4], @as(u32, @bitCast(s.x)), endian);
-                std.mem.writeInt(u32, buf[4..8], @as(u32, @bitCast(s.y)), endian);
-                try writer.appendSlice(allocator, &buf);
+                try writer.appendSlice(allocator, &[_]u8{ s.x, s.y });
             },
             .reset_stick => |s| {
                 try writer.append(allocator, @intFromEnum(CommandTag.reset_stick));

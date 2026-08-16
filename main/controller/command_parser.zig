@@ -159,7 +159,7 @@ test "parseTimeString" {
 }
 
 pub fn parseCommandButtons(allocator: std.mem.Allocator, iter: anytype) !Buttons {
-    var buttons: Buttons = try Buttons.initCapacity(allocator, 4);
+    var buttons: Buttons = .empty;
     errdefer buttons.deinit(allocator);
     while (iter.next()) |str| {
         const btn = stringToButton(str) orelse return error.UnknownButton;
@@ -192,7 +192,7 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
     var iter = std.mem.tokenizeAny(u8, trimmed, " \t");
     const cmd_str = iter.next() orelse return null;
 
-    var commands = try Commands.initCapacity(allocator, 4);
+    var commands = Commands.empty;
     errdefer commands.deinit(allocator);
 
     const tag = lowerStringToEnum(CommandTag, cmd_str) orelse return error.UnknownCommand;
@@ -259,8 +259,8 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             const y_str = iter.next() orelse return error.MissingArgument;
 
             const stick = stringToStick(stick_str) orelse return error.UnknownStick;
-            const x = try std.fmt.parseFloat(f32, x_str);
-            const y = try std.fmt.parseFloat(f32, y_str);
+            const x = try std.fmt.parseInt(u8, x_str, 10);
+            const y = try std.fmt.parseInt(u8, y_str, 10);
 
             try commands.append(allocator, Command{ .stick = .{ .stick = stick, .x = x, .y = y } });
         },
@@ -316,7 +316,7 @@ inline fn combineTailWaitTime(
 ) !void {
     var total_ms: u32 = current_ms;
 
-    var new_list = try Commands.initCapacity(allocator, 2);
+    var new_list = Commands.empty;
     defer new_list.deinit(allocator);
 
     while (commands.getLastOrNull()) |last| {
@@ -370,7 +370,7 @@ pub fn appendCommand(
 }
 
 pub fn parseCommandBlock(allocator: std.mem.Allocator, lines: anytype) !?Commands {
-    var list = try Commands.initCapacity(allocator, 16);
+    var list = Commands.empty;
     errdefer mod.command.deinitCommands(allocator, &list);
 
     stop_lines: while (lines.next()) |line| {

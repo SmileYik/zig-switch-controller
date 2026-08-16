@@ -20,43 +20,43 @@ pub const CommandTimeUnit = enum {
 };
 
 pub const CommandTag = enum(u8) {
-    end = 0,
+    end = 0x00,
     /// UP button
-    up = 1,
+    up = 0x01,
     /// DOWN button
-    down = 2,
+    down = 0x02,
     /// TAP button time_num{unit}
-    tap = 3,
+    tap = 0x03,
     /// STICK stick_type x y
-    stick = 4,
+    stick = 0x04,
 
-    up_combine = 5,
+    up_combine = 0x05,
     /// DOWN button
-    down_combine = 6,
+    down_combine = 0x06,
     /// TAP button time_num{unit}
-    tap_combine = 7,
+    tap_combine = 0x07,
 
     /// RESET_STICK stick_type
-    reset_stick = 21,
+    reset_stick = 0x21,
     /// RESET_BUTTON
-    reset_button = 22,
+    reset_button = 0x22,
     /// RESET_ALL
-    reset_all = 23,
+    reset_all = 0x23,
 
     /// WAIT time_num{unit}
-    wait = 41,
-    wait_u8 = 42,
-    wait_u16 = 43,
+    wait = 0x41,
+    wait_u8 = 0x42,
+    wait_u16 = 0x43,
 
     /// REPEAT times
     ///     COMMANDS
     /// END
-    repeat = 61,
-    repeat_u16 = 62,
-    repeat_u8 = 63,
+    repeat = 0x61,
+    repeat_u16 = 0x62,
+    repeat_u8 = 0x63,
 
     /// Other commands
-    commands = 81,
+    commands = 0x81,
 };
 
 pub const CombinedButton = struct {
@@ -69,7 +69,7 @@ pub const Command = union(CommandTag) {
     up: CombinedButton,
     down: CombinedButton,
     tap: struct { button: CombinedButton, duration: u32 },
-    stick: struct { stick: mod.StickType, x: f32, y: f32 },
+    stick: struct { stick: mod.StickType, x: u8, y: u8 },
     up_combine: CombinedButton,
     down_combine: CombinedButton,
     tap_combine: struct { button: CombinedButton, duration: u32 },
@@ -120,7 +120,6 @@ pub fn compile(allocator: std.mem.Allocator, script: []const u8) !?std.ArrayList
     if (opt) |*pack| {
         defer pack.deinit();
         const array = try compiler.compile(allocator, pack, .little);
-        try runner.byteCodeTest(allocator, array.items);
         return array;
     }
     return null;

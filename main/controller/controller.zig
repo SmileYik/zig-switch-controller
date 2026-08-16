@@ -132,9 +132,14 @@ pub fn pressButton(self: *Controller, button: mod.Button, state: mod.ButtonState
         };
 }
 
-pub fn setStick(self: *Controller, stick: mod.StickType, x: f32, y: f32) void {
+pub fn setStick(self: *Controller, stick: mod.StickType, x: u8, y: u8) void {
     self.mutex.lockUncancelable();
     defer self.mutex.unlock();
+
+    log.info(
+        "set stick [{}] (x, y) = ({d}, {d})",
+        .{ stick, x, y },
+    );
 
     switch (stick) {
         .left_stick => self.left_stick_centre = calibratedPosition(x, y, self.left_stick_calibration),
@@ -214,10 +219,10 @@ inline fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration)
     };
 }
 
-pub inline fn calibratedPosition(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
+pub inline fn calibratedPosition(x: u8, y: u8, calibration: StickCalibration) [3]u8 {
     return calibratedPositionInner(
-        std.math.clamp(x, -1.0, 1.0),
-        std.math.clamp(y, -1.0, 1.0),
+        std.math.clamp(@as(f32, @floatFromInt(x)), -1.0, 1.0),
+        std.math.clamp(@as(f32, @floatFromInt(y)), -1.0, 1.0),
         calibration,
     );
 }

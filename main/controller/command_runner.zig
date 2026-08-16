@@ -347,8 +347,8 @@ pub fn CommandRunner(comptime CallStack: type) type {
 
                     .stick => {
                         const stick_type: mod.StickType = try reader.readEnum(mod.StickType);
-                        const x: f32 = try reader.readFloat32();
-                        const y: f32 = try reader.readFloat32();
+                        const x: u8 = try reader.readByte();
+                        const y: u8 = try reader.readByte();
 
                         self.controller.setStick(stick_type, x, y);
                     },

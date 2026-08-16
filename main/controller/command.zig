@@ -69,7 +69,7 @@ pub const Command = union(CommandTag) {
     up: CombinedButton,
     down: CombinedButton,
     tap: struct { button: CombinedButton, duration: u32 },
-    stick: struct { stick: mod.StickType, x: u8, y: u8 },
+    stick: struct { stick: mod.StickType, x: i8, y: i8 },
     up_combine: CombinedButton,
     down_combine: CombinedButton,
     tap_combine: struct { button: CombinedButton, duration: u32 },

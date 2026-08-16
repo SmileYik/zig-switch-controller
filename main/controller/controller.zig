@@ -136,14 +136,14 @@ pub fn pressButton(self: *Controller, button: mod.Button, state: mod.ButtonState
         };
 }
 
-pub fn setStick(self: *Controller, stick: mod.StickType, x: u8, y: u8) void {
+pub fn setStick(self: *Controller, stick: mod.StickType, x: i8, y: i8) void {
     self.mutex.lockUncancelable();
     defer self.mutex.unlock();
 
     self.setStickUnlocked(stick, x, y);
 }
 
-pub fn setStickUnlocked(self: *Controller, stick: mod.StickType, x: u8, y: u8) void {
+pub fn setStickUnlocked(self: *Controller, stick: mod.StickType, x: i8, y: i8) void {
     log.info(
         "set stick [{}] (x, y) = ({d}, {d})",
         .{ stick, x, y },
@@ -232,10 +232,10 @@ inline fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration)
     };
 }
 
-pub inline fn calibratedPosition(x: u8, y: u8, calibration: StickCalibration) [3]u8 {
+pub inline fn calibratedPosition(x: i8, y: i8, calibration: StickCalibration) [3]u8 {
     return calibratedPositionInner(
-        std.math.clamp(@as(f32, @floatFromInt(x)), -1.0, 1.0),
-        std.math.clamp(@as(f32, @floatFromInt(y)), -1.0, 1.0),
+        std.math.clamp(@as(f32, @floatFromInt(x)) / 100.0, -1.0, 1.0),
+        std.math.clamp(@as(f32, @floatFromInt(y)) / 100.0, -1.0, 1.0),
         calibration,
     );
 }

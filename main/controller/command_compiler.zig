@@ -63,7 +63,10 @@ pub fn compileCommand(
             .stick => |s| {
                 try writer.append(allocator, @intFromEnum(CommandTag.stick));
                 try writer.append(allocator, @intFromEnum(s.stick));
-                try writer.appendSlice(allocator, &[_]u8{ s.x, s.y });
+                try writer.appendSlice(allocator, &[_]u8{
+                    @as(u8, @bitCast(s.x)),
+                    @as(u8, @bitCast(s.y)),
+                });
             },
             .reset_stick => |s| {
                 try writer.append(allocator, @intFromEnum(CommandTag.reset_stick));

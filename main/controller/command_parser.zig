@@ -259,8 +259,8 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             const y_str = iter.next() orelse return error.MissingArgument;
 
             const stick = stringToStick(stick_str) orelse return error.UnknownStick;
-            const x = try std.fmt.parseInt(u8, x_str, 10);
-            const y = try std.fmt.parseInt(u8, y_str, 10);
+            const x = try std.fmt.parseInt(i8, x_str, 10);
+            const y = try std.fmt.parseInt(i8, y_str, 10);
 
             try commands.append(allocator, Command{ .stick = .{ .stick = stick, .x = x, .y = y } });
         },

@@ -350,7 +350,7 @@ pub fn CommandRunner(comptime CallStack: type) type {
                         const x: u8 = try reader.readByte();
                         const y: u8 = try reader.readByte();
 
-                        self.controller.setStick(stick_type, x, y);
+                        self.controller.setStick(stick_type, @bitCast(x), @bitCast(y));
                     },
 
                     .reset_stick => {

@@ -6,6 +6,7 @@ const nvs = mod.idf.nvs;
 const log = std.log.scoped(.config);
 const MAX_KEY_LEN = 15;
 
+/// u128 div
 pub export fn __udivti3(a: u128, b: u128) u128 {
     return a / b;
 }

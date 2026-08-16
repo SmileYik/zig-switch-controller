@@ -144,7 +144,16 @@ pub fn ReportQueue(comptime size: usize) type {
                             self.protocol.processCommands(s orelse &[_]u8{});
                             self.handleInputSnapshot(null);
                             defer self.protocol.clearReport();
-                            self.bt.sendReport(self.protocol.report[0..]) catch {};
+                            switch (self.protocol.response) {
+                                .no_data, .malformed, .too_short => {
+                                    if (s == null) {
+                                        self.bt.sendReport(self.protocol.report[0..]) catch {};
+                                    }
+                                },
+                                else => {
+                                    self.bt.sendReport(self.protocol.report[0..]) catch {};
+                                },
+                            }
                         },
 
                         .sending => |s| {

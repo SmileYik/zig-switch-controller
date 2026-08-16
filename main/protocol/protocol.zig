@@ -47,6 +47,8 @@ imu_enabled: bool = false,
 colour_body: [3]u8,
 colour_buttons: [3]u8,
 
+response: protocol.Constants.SwitchResponse = .no_data,
+
 pub fn init(opt: Options) Protocol {
     var self = Protocol{
         .parser = opt.parser,
@@ -93,6 +95,7 @@ inline fn setEmptyReport(self: *Protocol) void {
 
 pub fn processCommands(self: *Protocol, data: []const u8) void {
     const message = self.parser.parse(data);
+    self.response = message.response;
 
     switch (message.response) {
         .request_device_info => {

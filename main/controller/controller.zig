@@ -17,12 +17,12 @@ const Controller = @This();
 
 /// NS Switch Controller Pro x/y value in [0, 4095], u12
 pub const StickCalibration = struct {
-    center_x: i16 = 2048,
-    center_y: i16 = 2048,
-    min_x: i16 = -1600,
-    max_x: i16 = 1600,
-    min_y: i16 = -1600,
-    max_y: i16 = 1600,
+    center_x: i16 = 2070,
+    center_y: i16 = 2013,
+    min_x: i16 = -1522,
+    max_x: i16 = 1414,
+    min_y: i16 = -1531,
+    max_y: i16 = 1510,
 };
 
 pub const Options = struct {
@@ -46,6 +46,7 @@ mutex: Mutex,
 allocator: std.mem.Allocator,
 handler: mod.ControllerHandler,
 running: std.atomic.Value(bool) = .init(false),
+heartbeat: bool = true,
 
 pub fn init(allocator: std.mem.Allocator, handler: anytype, opt: Options) !*Controller {
     const ptr: *Controller = try allocator.create(Controller);
@@ -61,6 +62,9 @@ pub fn init(allocator: std.mem.Allocator, handler: anytype, opt: Options) !*Cont
         .left_stick_calibration = opt.left_stick_calibration,
         .right_stick_calibration = opt.right_stick_calibration,
     };
+
+    ptr.resetStick(.left_stick);
+    ptr.resetStick(.right_stick);
 
     return ptr;
 }
@@ -136,6 +140,10 @@ pub fn setStick(self: *Controller, stick: mod.StickType, x: u8, y: u8) void {
     self.mutex.lockUncancelable();
     defer self.mutex.unlock();
 
+    self.setStickUnlocked(stick, x, y);
+}
+
+pub fn setStickUnlocked(self: *Controller, stick: mod.StickType, x: u8, y: u8) void {
     log.info(
         "set stick [{}] (x, y) = ({d}, {d})",
         .{ stick, x, y },
@@ -155,10 +163,11 @@ pub fn resetStick(self: *Controller, stick: mod.StickType) void {
     self.mutex.lockUncancelable();
     defer self.mutex.unlock();
 
-    switch (stick) {
-        .left_stick => @memset(&self.left_stick_centre, 0),
-        .right_stick => @memset(&self.right_stick_centre, 0),
-    }
+    self.resetStickUnlocked(stick);
+}
+
+pub fn resetStickUnlocked(self: *Controller, stick: mod.StickType) void {
+    self.setStickUnlocked(stick, 0, 0);
 
     self.handler.send(self.packetUnlocked()) catch |err| {
         log.err("failed to reset stick report: {s}", .{@errorName(err)});
@@ -176,6 +185,10 @@ pub fn resetButton(self: *Controller) void {
     self.handler.send(self.packetUnlocked()) catch |err| {
         log.err("failed to send reset button report: {s}", .{@errorName(err)});
     };
+}
+
+pub fn setHeartbeat(self: *Controller, flag: bool) void {
+    self.heartbeat = flag;
 }
 
 /// set button bit. if state is press then set bit to `1`, else set bit to `0`.

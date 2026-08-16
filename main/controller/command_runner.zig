@@ -248,10 +248,10 @@ pub fn CommandRunner(comptime CallStack: type) type {
                 .wait => |ms| self.controller.handler.sleep(ms),
                 .wait_u16 => |ms| self.controller.handler.sleep(@intCast(ms)),
                 .wait_u8 => |ms| self.controller.handler.sleep(@intCast(ms)),
-                .commands => |*cs| self.controller.runCommands(cs),
+                .commands => |*cs| self.runCommands(cs),
                 .repeat => |*repeat| {
                     for (0..repeat.times) |_| {
-                        self.controller.runCommands(&repeat.commands);
+                        self.runCommands(&repeat.commands);
                     }
                 },
                 else => {},

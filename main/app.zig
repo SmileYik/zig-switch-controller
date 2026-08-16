@@ -34,22 +34,6 @@ const ReportSender = struct {
     }
 };
 
-const Runner = mod.controller.command.runner.CommandRunner(mod.controller.command.runner.CallStackAlloc);
-
-const A = struct {
-    a: i8 = -1,
-};
-
-const B = struct {
-    a: []const u8 = "Hello",
-    b: [32]u8 = std.mem.zeroes([32]u8),
-};
-
-const E = enum(u8) {
-    a = 0x01,
-    b_b = 0x10,
-};
-
 // ---------------------------------------------------------------------------
 // 6. 初始化与 app_main
 // ---------------------------------------------------------------------------
@@ -101,10 +85,6 @@ export fn app_main() callconv(.c) void {
     http_srv.start() catch |err| {
         log.err("Http Server 开启失败: {s}", .{@errorName(err)});
     };
-    var http_action = mod.http_action.init(allocator);
-    http_srv.registerUris(http_action.getUris()) catch |err| {
-        log.err("Http action 注册失败: {s}", .{@errorName(err)});
-    };
 
     var queue = mod.ReportQueue.init(
         allocator,
@@ -135,234 +115,32 @@ export fn app_main() callconv(.c) void {
         return;
     };
     defer controller.deinit();
-    // controller.start() catch |err| {
-    //     log.err("控制器启动失败!: {s}", .{@errorName(err)});
-    //     return;
-    // };
+
+    var http_action = mod.http_action.init(allocator, controller);
+    http_srv.registerUris(http_action.getUris()) catch |err| {
+        log.err("Http action 注册失败: {s}", .{@errorName(err)});
+    };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
-    _ = idf.rtos.Task.create(sendReportTask, "send_report", 1024 * 2, controller, 5) catch @panic("Task send_report not created");
 
     while (!queue.is_connected.load(.acquire)) {
         idf.rtos.Task.delayMs(1000);
     }
 
-    var command_pack_opt = mod.controller.command.parser.parseCommand(allocator, SCRIPT) catch |err| {
-        log.err("控制器脚本失败!: {s}", .{@errorName(err)});
-        return;
-    };
-    if (command_pack_opt) |*pack| {
-        defer pack.deinit();
-        var bytecode = pack.compile(allocator, .little) catch |err| {
-            log.err("编译宏字节码失败!: {s}", .{@errorName(err)});
-            return;
-        };
-        log.info("bytecode [len={d}]: {x}", .{ bytecode.items.len, bytecode.items });
-        defer bytecode.deinit(allocator);
-
-        var runner: Runner = .{ .controller = controller, .stack = .init(allocator) };
-        runner.runByteCode(bytecode.items) catch |err| {
-            log.err("运行宏字节码失败!: {s}", .{@errorName(err)});
-            return;
-        };
+    // heartbeat loop
+    while (true) {
+        sendReportTask(controller);
     }
-    log.err("main task quit!", .{});
 }
 
 export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
     var controller: *mod.controller.Controller = @ptrCast(@alignCast(ctx.?));
     while (true) {
-        controller.handler.send(controller.packet()) catch {};
+        if (controller.heartbeat)
+            controller.handler.send(.{ .incoming = null }) catch {};
         idf.rtos.Task.delayMs(500);
     }
 }
-
-const SCRIPT =
-    \\  REPEAT 5
-    \\    DOWN R L
-    \\    WAIT 66ms
-    \\    UP R L
-    \\    WAIT 66ms
-    \\  END
-;
-
-// const SCRIPT =
-//     \\REPEAT 4294967294
-//     \\
-//     \\  REPEAT 5
-//     \\    DOWN R L
-//     \\    WAIT 66ms
-//     \\    UP R L
-//     \\    WAIT 66ms
-//     \\  END
-//     \\
-//     \\  WAIT 10s
-//     \\
-//     \\  REPEAT 1
-//     \\    DOWN A
-//     \\    WAIT 66ms
-//     \\    UP A
-//     \\    WAIT 66ms
-//     \\  END
-//     \\
-//     \\  WAIT 20s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN ZR
-//     \\  WAIT 66ms
-//     \\  UP ZR
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN R
-//     \\  WAIT 66ms
-//     \\  UP R
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     // \\REPEAT 3
-//     // \\  DOWN JCL_SL
-//     // \\  WAIT 66ms
-//     // \\  UP JCL_SL
-//     // \\END
-//     // \\WAIT 1s
-//     // \\
-//     // \\REPEAT 3
-//     // \\  DOWN JCL_SR
-//     // \\  WAIT 66ms
-//     // \\  UP JCL_SR
-//     // \\END
-//     // \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN A
-//     \\  WAIT 66ms
-//     \\  UP A
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN B
-//     \\  WAIT 66ms
-//     \\  UP B
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN X
-//     \\  WAIT 66ms
-//     \\  UP X
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN Y
-//     \\  WAIT 66ms
-//     \\  UP Y
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     // \\REPEAT 3
-//     // \\  DOWN CAPTURE
-//     // \\  WAIT 66ms
-//     // \\  UP CAPTURE
-//     // \\END
-//     // \\WAIT 1s
-//     \\
-//     // \\REPEAT 3
-//     // \\  DOWN HOME
-//     // \\  WAIT 66ms
-//     // \\  UP HOME
-//     // \\END
-//     // \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN L_STICK_PRESSED
-//     \\  WAIT 66ms
-//     \\  UP L_STICK_PRESSED
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN R_STICK_PRESSED
-//     \\  WAIT 66ms
-//     \\  UP R_STICK_PRESSED
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN PLUS
-//     \\  WAIT 66ms
-//     \\  UP PLUS
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN MINUS
-//     \\  WAIT 66ms
-//     \\  UP MINUS
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN ZL
-//     \\  WAIT 66ms
-//     \\  UP ZL
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN L
-//     \\  WAIT 66ms
-//     \\  UP L
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     // \\REPEAT 3
-//     // \\  DOWN JCR_SL
-//     // \\  WAIT 66ms
-//     // \\  UP JCR_SL
-//     // \\END
-//     // \\WAIT 1s
-//     // \\
-//     // \\REPEAT 3
-//     // \\  DOWN JCR_SR
-//     // \\  WAIT 66ms
-//     // \\  UP JCR_SR
-//     // \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN DPAD_LEFT
-//     \\  WAIT 66ms
-//     \\  UP DPAD_LEFT
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN DPAD_RIGHT
-//     \\  WAIT 66ms
-//     \\  UP DPAD_RIGHT
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN DPAD_UP
-//     \\  WAIT 66ms
-//     \\  UP DPAD_UP
-//     \\END
-//     \\WAIT 1s
-//     \\
-//     \\REPEAT 3
-//     \\  DOWN DPAD_DOWN
-//     \\  WAIT 66ms
-//     \\  UP DPAD_DOWN
-//     \\END
-//     \\
-//     \\END
-//     \\
-// ;
 
 pub const panic = idf.esp_panic.panic;
 pub const std_options: std.Options = .{

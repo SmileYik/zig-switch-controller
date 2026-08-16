@@ -3,12 +3,17 @@ const mod = @import("root.zig");
 const sys = mod.sys;
 const idf = mod.idf;
 
+const runner = mod.controller.command.runner;
+const CommandRunner = runner.CommandRunner(runner.CallStackAlloc);
+
 const log = std.log.scoped(.http_action);
 
 const Self = @This();
 
 allocator: std.mem.Allocator,
-uris: [6]mod.http.Uri = [_]mod.http.Uri{
+controller: *mod.controller.Controller,
+
+uris: [7]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -45,10 +50,19 @@ uris: [6]mod.http.Uri = [_]mod.http.Uri{
         .handler = &postCommandTestBase64,
         .user_ctx = null,
     },
+    .{
+        .uri = "/api/command/run/sync/raw",
+        .method = sys.HTTP_POST,
+        .handler = &postCommandRunSyncRaw,
+        .user_ctx = null,
+    },
 },
 
-pub fn init(allocator: std.mem.Allocator) Self {
-    return .{ .allocator = allocator };
+pub fn init(
+    allocator: std.mem.Allocator,
+    controller: *mod.controller.Controller,
+) Self {
+    return .{ .allocator = allocator, .controller = controller };
 }
 
 pub fn getUris(self: *Self) []const mod.http.Uri {
@@ -218,6 +232,39 @@ export fn postCommandTestBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
             return sys.ESP_FAIL;
         };
         self.sendStructAsJson(req, null, "complete test!");
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
+    return sys.ESP_OK;
+}
+
+/// POST /api/command/run/sync/raw
+export fn postCommandRunSyncRaw(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var array_opt = self.readBody(self.allocator, req);
+    if (array_opt) |*body| {
+        var opt = mod.controller.command.parser.parseCommand(self.allocator, body.items) catch |e| {
+            self.sendError(req, "parse-script-failed", e);
+            body.deinit(self.allocator);
+            return sys.ESP_FAIL;
+        };
+
+        body.deinit(self.allocator);
+        if (opt) |*pack| {
+            defer pack.deinit();
+
+            var r = CommandRunner{
+                .controller = self.controller,
+                .stack = .init(self.allocator),
+            };
+            defer r.deinit();
+
+            self.controller.setHeartbeat(false);
+            r.runCommandPack(pack);
+            self.controller.setHeartbeat(true);
+        }
+        self.sendStructAsJson(req, null, "complete!");
     } else {
         self.sendJsonError(req, 500, "not a valid payload");
     }

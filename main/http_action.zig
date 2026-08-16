@@ -8,7 +8,7 @@ const log = std.log.scoped(.http_action);
 const Self = @This();
 
 allocator: std.mem.Allocator,
-uris: [5]mod.http.Uri = [_]mod.http.Uri{
+uris: [6]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -37,6 +37,12 @@ uris: [5]mod.http.Uri = [_]mod.http.Uri{
         .uri = "/api/command/compile/hex",
         .method = sys.HTTP_POST,
         .handler = &postCommandCompileHex,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/command/test/base64",
+        .method = sys.HTTP_POST,
+        .handler = &postCommandTestBase64,
         .user_ctx = null,
     },
 },
@@ -79,8 +85,20 @@ export fn getWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     ) catch
         mod.config.DefaultConfig(mod.Configuration.WifiConfig{});
     defer loaded.deinit();
+    const template =
+        \\{{"ap":{{"ssid": "{s}", "pwd":"{s}"}},"sta":{{"ssid": "{s}", "pwd":"{s}"}}}}
+    ;
+    const msg = std.fmt.allocPrint(self.allocator, template, .{
+        loaded.config.ap.ssid,
+        loaded.config.ap.pwd,
+        loaded.config.sta.ssid,
+        loaded.config.sta.pwd,
+    }) catch |e| {
+        self.sendError(req, "parsed-wifi-config-failed", e);
+        return sys.ESP_FAIL;
+    };
 
-    self.sendStructAsJson(req, loaded.config, null);
+    self.sendStructAsJson(req, msg, null);
     return sys.ESP_OK;
 }
 
@@ -107,7 +125,7 @@ export fn postWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
             self.sendError(req, "store-wifi-config-failed", e);
             return sys.ESP_FAIL;
         };
-        self.sendStructAsJson(req, " ", "configurate wifi success");
+        self.sendStructAsJson(req, null, "configurate wifi success");
     } else {
         self.sendJsonError(req, 500, "request body is empty");
     }
@@ -133,7 +151,7 @@ export fn postCommandCompileBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
         };
         if (opt) |*base64| {
             defer self.allocator.free(base64.*);
-            self.sendStructAsJson(req, base64, "finished compiled");
+            self.sendStringAsJson(req, base64.*, "finished compiled");
         } else {
             self.sendJsonError(req, 500, "can not compile to bytecode");
         }
@@ -162,7 +180,7 @@ export fn postCommandCompileHex(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
         };
         if (opt) |*base64| {
             defer self.allocator.free(base64.*);
-            self.sendStructAsJson(req, base64, "finished compiled");
+            self.sendStringAsJson(req, base64.*, "finished compiled");
         } else {
             self.sendJsonError(req, 500, "can not compile to bytecode");
         }
@@ -172,12 +190,38 @@ export fn postCommandCompileHex(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
     return sys.ESP_OK;
 }
 
-fn Result(comptime T: type) type {
-    return struct {
-        code: u16,
-        data: ?T = null,
-        msg: ?[]const u8 = null,
-    };
+/// POST /api/command/test/base64
+export fn postCommandTestBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var array_opt = self.readBody(self.allocator, req);
+    if (array_opt) |*body| {
+        defer body.deinit(self.allocator);
+
+        const dec = std.base64.url_safe.Decoder;
+        const size = dec.calcSizeForSlice(body.items) catch |e| {
+            self.sendError(req, "calculate-base64-decode-size-failed", e);
+            return sys.ESP_FAIL;
+        };
+        const buf = self.allocator.alloc(u8, size) catch |e| {
+            self.sendError(req, "alloc-calculate-base64-decode-size-failed", e);
+            return sys.ESP_FAIL;
+        };
+        defer self.allocator.free(buf);
+        dec.decode(buf, body.items) catch |e| {
+            self.sendError(req, "decode-base64-failed", e);
+            return sys.ESP_FAIL;
+        };
+
+        mod.controller.command.runner.byteCodeTest(self.allocator, buf) catch |e| {
+            self.sendError(req, "decode-base64-failed", e);
+            return sys.ESP_FAIL;
+        };
+        self.sendStructAsJson(req, null, "complete test!");
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
+    return sys.ESP_OK;
 }
 
 fn sendError(
@@ -186,7 +230,6 @@ fn sendError(
     comptime prefix: []const u8,
     err: anyerror,
 ) void {
-    const R = Result([]const u8);
     var buf: [256:0]u8 = undefined;
     const msg = std.fmt.bufPrintSentinel(
         &buf,
@@ -195,42 +238,27 @@ fn sendError(
         0,
     ) catch prefix ++ ": error";
 
-    const json = std.fmt.allocPrintSentinel(
-        self.allocator,
-        "{f}",
-        .{
-            std.json.fmt(R{
-                .code = 500,
-                .msg = msg,
-            }, .{}),
-        },
-        0,
-    ) catch {
-        idf.http.Server.Response.sendStr(req, msg) catch {
-            log.err("failed to send error message: {s}", .{msg});
-            return;
-        };
-        return;
-    };
-    defer self.allocator.free(json);
-
-    idf.http.Server.Response.setHDR(req, "content-type", "application/json") catch {
-        log.err("failed to send error message: {s}", .{msg});
-        return;
-    };
-    idf.http.Server.Response.sendStr(req, json) catch {
-        log.err("failed to send error message: {s}", .{msg});
-        return;
-    };
+    self.sendJsonError(req, 500, msg);
 }
 
 fn sendJsonError(
     self: *Self,
     req: [*c]mod.http.Req,
     comptime code: u16,
-    comptime msg: ?[]const u8,
+    msg: ?[]const u8,
 ) void {
-    self.sendStructAsJsonInner(req, code, ' ', msg) catch |e| {
+    self.sendStructAsJsonInner(req, code, "", false, msg) catch |e| {
+        self.sendError(req, "send-json-error-failed", e);
+    };
+}
+
+fn sendStringAsJson(
+    self: *Self,
+    req: [*c]mod.http.Req,
+    value: ?[]const u8,
+    message: ?[]const u8,
+) void {
+    self.sendStructAsJsonInner(req, 200, value, true, message) catch |e| {
         self.sendError(req, "send-json-error-failed", e);
     };
 }
@@ -238,10 +266,10 @@ fn sendJsonError(
 fn sendStructAsJson(
     self: *Self,
     req: [*c]mod.http.Req,
-    value: anytype,
-    comptime message: ?[]const u8,
+    value: ?[]const u8,
+    message: ?[]const u8,
 ) void {
-    self.sendStructAsJsonInner(req, 200, value, message) catch |e| {
+    self.sendStructAsJsonInner(req, 200, value, false, message) catch |e| {
         self.sendError(req, "send-json-error-failed", e);
     };
 }
@@ -250,20 +278,19 @@ fn sendStructAsJsonInner(
     self: *Self,
     req: [*c]mod.http.Req,
     comptime code: u16,
-    value: anytype,
-    comptime message: ?[]const u8,
+    value: ?[]const u8,
+    has_quote: bool,
+    message: ?[]const u8,
 ) !void {
-    const T = @TypeOf(value);
-    const R = Result(T);
     const json = try std.fmt.allocPrintSentinel(
         self.allocator,
-        "{f}",
+        "{{\"code\":{d},\"msg\":\"{s}\",\"data\":{s}{s}{s}}}",
         .{
-            std.json.fmt(R{
-                .code = code,
-                .data = value,
-                .msg = message,
-            }, .{}),
+            code,
+            message orelse "",
+            if (has_quote) "\"" else "",
+            value orelse "null",
+            if (has_quote) "\"" else "",
         },
         0,
     );

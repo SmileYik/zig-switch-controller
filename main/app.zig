@@ -68,7 +68,6 @@ export fn app_main() callconv(.c) void {
     wifi.startWifi() catch |err| {
         log.err("Wifi 开启失败: {s}", .{@errorName(err)});
     };
-    _ = wifi.waitForConnect(60000);
     wifi_config.deinit();
 
     var http_srv = mod.http.init();
@@ -115,6 +114,8 @@ export fn app_main() callconv(.c) void {
     };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
+
+    _ = wifi.waitForConnect(60000);
 
     while (!queue.is_connected.load(.acquire)) {
         idf.rtos.Task.delayMs(1000);

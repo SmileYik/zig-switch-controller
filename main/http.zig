@@ -21,6 +21,8 @@ pub fn start(self: *http) !void {
 
     var config = sys.zig_httpd_default_config();
     config.stack_size = 20480;
+    config.recv_wait_timeout = 90;
+
     self.server = try idf.http.Server.start(&config);
 }
 

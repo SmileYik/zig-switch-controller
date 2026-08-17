@@ -13,7 +13,7 @@ const Self = @This();
 allocator: std.mem.Allocator,
 controller: *mod.controller.Controller,
 
-uris: [7]mod.http.Uri = [_]mod.http.Uri{
+uris: [8]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -48,6 +48,12 @@ uris: [7]mod.http.Uri = [_]mod.http.Uri{
         .uri = "/api/command/test/base64",
         .method = sys.HTTP_POST,
         .handler = &postCommandTestBase64,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/command/run/sync/base64",
+        .method = sys.HTTP_POST,
+        .handler = &postCommandRunSyncBase64,
         .user_ctx = null,
     },
     .{
@@ -271,8 +277,51 @@ export fn postCommandRunSyncRaw(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
     return sys.ESP_OK;
 }
 
+/// POST /api/command/run/sync/base64
+export fn postCommandRunSyncBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var array_opt = self.readBody(self.allocator, req);
+    if (array_opt) |*body| {
+        defer body.deinit(self.allocator);
+
+        const dec = std.base64.url_safe.Decoder;
+        const size = dec.calcSizeForSlice(body.items) catch |e| {
+            self.sendError(req, "calculate-base64-decode-size-failed", e);
+            return sys.ESP_FAIL;
+        };
+        const buf = self.allocator.alloc(u8, size) catch |e| {
+            self.sendError(req, "alloc-calculate-base64-decode-size-failed", e);
+            return sys.ESP_FAIL;
+        };
+        defer self.allocator.free(buf);
+        dec.decode(buf, body.items) catch |e| {
+            self.sendError(req, "decode-base64-failed", e);
+            return sys.ESP_FAIL;
+        };
+
+        var r = CommandRunner{
+            .controller = self.controller,
+            .stack = .init(self.allocator),
+        };
+        defer r.deinit();
+
+        self.controller.setHeartbeat(false);
+        defer self.controller.setHeartbeat(true);
+        r.runByteCode(buf) catch |e| {
+            self.sendError(req, "decode-base64-failed", e);
+            return sys.ESP_FAIL;
+        };
+
+        self.sendStructAsJson(req, null, "complete test!");
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
+    return sys.ESP_OK;
+}
+
 fn sendError(
-    self: *Self,
+    _: *Self,
     req: [*c]mod.http.Req,
     comptime prefix: []const u8,
     err: anyerror,
@@ -285,7 +334,9 @@ fn sendError(
         0,
     ) catch prefix ++ ": error";
 
-    self.sendJsonError(req, 500, msg);
+    idf.http.Server.Response.sendStr(req, msg) catch |e| {
+        log.err("error message: {s}, sendStr: {s}", .{ msg, @errorName(e) });
+    };
 }
 
 fn sendJsonError(
@@ -343,6 +394,7 @@ fn sendStructAsJsonInner(
     );
     defer self.allocator.free(json);
 
+    try idf.http.Server.Response.setHDR(req, "Access-Control-Allow-Origin", "*");
     try idf.http.Server.Response.setHDR(req, "content-type", "application/json");
     try idf.http.Server.Response.sendStr(req, json);
 }
@@ -358,7 +410,7 @@ fn readBody(
 
     while (true) {
         const len = idf.http.Server.Request.receiver(req, &buf, buf.len);
-        if (len > 0) {
+        if (len > 0 or len == sys.HTTPD_SOCK_ERR_TIMEOUT) {
             array.appendSlice(allocator, buf[0..@as(usize, @intCast(len))]) catch |e| {
                 self.sendError(req, "Read-body-failed", e);
                 defer array.deinit(allocator);

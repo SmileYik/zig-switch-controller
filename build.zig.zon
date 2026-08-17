@@ -1,7 +1,7 @@
 .{
-    .name = .esp_idf_sample,
+    .name = .zig_switch_controller,
     .version = "0.1.0",
-    .fingerprint = 0xbe5a38cf3bc380ae,
+    .fingerprint = 0x37c308ea85fbd1a0,
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
@@ -47,8 +47,7 @@
         "imports",
         "build.zig",
         "build.zig.zon",
-        "LICENSE-APACHE",
-        "LICENSE-MIT",
+        "LICENSE",
         "README.md",
     },
 }

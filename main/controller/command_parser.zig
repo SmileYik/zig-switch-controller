@@ -12,21 +12,21 @@ const Command = mod.command.Command;
 const Commands = std.ArrayList(Command);
 const CommandPack = mod.command.CommandPack;
 
-pub inline fn isUpperString(str: []const u8) bool {
+pub fn isUpperString(str: []const u8) bool {
     for (str) |c| {
         if (std.ascii.isLower(c)) return false;
     }
     return true;
 }
 
-pub inline fn isLowerString(str: []const u8) bool {
+pub fn isLowerString(str: []const u8) bool {
     for (str) |c| {
         if (std.ascii.isUpper(c)) return false;
     }
     return true;
 }
 
-pub inline fn maxEnumsFieldLen(comptime types: anytype) comptime_int {
+pub fn maxEnumsFieldLen(comptime types: anytype) comptime_int {
     var max: comptime_int = 0;
     inline for (types) |t| {
         max = @max(max, comptime maxEnumFieldLen(t));
@@ -34,7 +34,7 @@ pub inline fn maxEnumsFieldLen(comptime types: anytype) comptime_int {
     return max;
 }
 
-pub inline fn maxEnumFieldLen(comptime T: type) comptime_int {
+pub fn maxEnumFieldLen(comptime T: type) comptime_int {
     const info = @typeInfo(T);
     if (info != .@"enum") return 0;
 
@@ -46,7 +46,7 @@ pub inline fn maxEnumFieldLen(comptime T: type) comptime_int {
 }
 
 /// `button_name` should be upper.
-inline fn stringToButtonInner(button_name: []const u8) ?mod.Button {
+fn stringToButtonInner(button_name: []const u8) ?mod.Button {
     return if (std.meta.stringToEnum(mod.ButtonUpper, button_name)) |btn|
         .{ .upper = btn }
     else if (std.meta.stringToEnum(mod.ButtonLower, button_name)) |btn|
@@ -57,7 +57,7 @@ inline fn stringToButtonInner(button_name: []const u8) ?mod.Button {
         null;
 }
 
-pub inline fn stringToButton(button_name: []const u8) ?mod.Button {
+pub fn stringToButton(button_name: []const u8) ?mod.Button {
     if (isUpperString(button_name)) {
         return stringToButtonInner(button_name);
     } else {
@@ -78,7 +78,7 @@ test "stringToButton" {
     try ExpectEqual(mod.Button{ .upper = .A }, stringToButton("a"));
 }
 
-pub inline fn lowerStringToEnum(comptime E: anytype, name: []const u8) ?E {
+pub fn lowerStringToEnum(comptime E: anytype, name: []const u8) ?E {
     if (isLowerString(name)) {
         return std.meta.stringToEnum(E, name);
     } else {
@@ -90,7 +90,7 @@ pub inline fn lowerStringToEnum(comptime E: anytype, name: []const u8) ?E {
     }
 }
 
-pub inline fn stringToStick(stick_name: []const u8) ?mod.StickType {
+pub fn stringToStick(stick_name: []const u8) ?mod.StickType {
     return lowerStringToEnum(mod.StickType, stick_name);
 }
 
@@ -101,7 +101,7 @@ test "stringToStick" {
     try ExpectEqual(mod.StickType.right_stick, stringToStick("right_stick"));
 }
 
-pub inline fn stringToButtonState(button_state_name: []const u8) ?mod.ButtonState {
+pub fn stringToButtonState(button_state_name: []const u8) ?mod.ButtonState {
     return lowerStringToEnum(mod.ButtonState, button_state_name);
 }
 
@@ -111,7 +111,7 @@ test "stringToButtonState" {
     try ExpectEqual(mod.ButtonState.up, stringToButtonState("UP"));
 }
 
-inline fn parseTimeString(str: []const u8) !u32 {
+fn parseTimeString(str: []const u8) !u32 {
     if (str.len == 0) return error.WrongTimeNumber;
 
     const unit_start = blk: {
@@ -169,7 +169,7 @@ pub fn parseCommandButtons(allocator: std.mem.Allocator, iter: anytype) !Buttons
     return buttons;
 }
 
-inline fn appendWaitCommand(
+fn appendWaitCommand(
     allocator: std.mem.Allocator,
     commands: *Commands,
     ms: u32,
@@ -284,7 +284,7 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
     return commands;
 }
 
-inline fn eraseTailSameCommand(
+fn eraseTailSameCommand(
     commands: *Commands,
     command: Command,
 ) bool {
@@ -297,7 +297,7 @@ inline fn eraseTailSameCommand(
     return len != commands.items.len;
 }
 
-inline fn safeAppendCombineTime(
+fn safeAppendCombineTime(
     allocator: std.mem.Allocator,
     commands: *Commands,
     total_ms: u32,
@@ -309,7 +309,7 @@ inline fn safeAppendCombineTime(
     };
 }
 
-inline fn combineTailWaitTime(
+fn combineTailWaitTime(
     allocator: std.mem.Allocator,
     commands: *Commands,
     current_ms: u32,

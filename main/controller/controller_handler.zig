@@ -7,7 +7,7 @@ ctx: *anyopaque,
 sendFn: *const fn (ctx: *anyopaque, report: ReportType) anyerror!void = undefined,
 sleepFn: *const fn (ctx: *anyopaque, ms: u32) void = undefined,
 
-pub inline fn init(handler: anytype) ControllerHandler {
+pub fn init(handler: anytype) ControllerHandler {
     const Pointer = @TypeOf(handler);
     comptime {
         const info = @typeInfo(Pointer);
@@ -45,10 +45,10 @@ pub inline fn init(handler: anytype) ControllerHandler {
     return interface;
 }
 
-pub inline fn send(self: *ControllerHandler, report: ReportType) !void {
+pub fn send(self: *ControllerHandler, report: ReportType) !void {
     return self.sendFn(self.ctx, report);
 }
 
-pub inline fn sleep(self: *ControllerHandler, ms: u32) void {
+pub fn sleep(self: *ControllerHandler, ms: u32) void {
     self.sleepFn(self.ctx, ms);
 }

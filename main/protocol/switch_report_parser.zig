@@ -12,7 +12,7 @@ data_len: u8,
 payload_len: u8,
 magic_head: ?u8,
 
-pub inline fn init(opt: SwitchReportParser.Options) SwitchReportParser {
+pub fn init(opt: SwitchReportParser.Options) SwitchReportParser {
     return .{
         .data_len = opt.data_len,
         .payload_len = opt.payload_len,
@@ -20,7 +20,7 @@ pub inline fn init(opt: SwitchReportParser.Options) SwitchReportParser {
     };
 }
 
-pub inline fn parse(self: *const SwitchReportParser, data: []const u8) protocol.Report {
+pub fn parse(self: *const SwitchReportParser, data: []const u8) protocol.Report {
     if (data.len == 0) {
         return .{ .response = .no_data };
     } else if (data.len < self.data_len) {

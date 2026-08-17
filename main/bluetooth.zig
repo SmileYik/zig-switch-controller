@@ -87,7 +87,7 @@ const HandlerInterface = struct {
     ctx: *anyopaque,
     handleHIDDFn: ?*const fn (ctx: *anyopaque, event: HIDDEvent) void = null,
 
-    pub inline fn init(handler: anytype) HandlerInterface {
+    pub fn init(handler: anytype) HandlerInterface {
         var interface: HandlerInterface = .{ .ctx = handler };
 
         const Pointer = @TypeOf(handler);
@@ -239,21 +239,21 @@ fn start(self: *Self) !void {
     };
 }
 
-inline fn setGapRegisterCallback(callback: sys.esp_bt_gap_cb_t) !void {
+fn setGapRegisterCallback(callback: sys.esp_bt_gap_cb_t) !void {
     errors.espCheckError(sys.esp_bt_gap_register_callback(callback)) catch |e| {
         log.err("GAP register callback failed: {s}", .{@errorName(e)});
         return BTError.GAPRegisterCallbackFailed;
     };
 }
 
-inline fn setHidDeviceRegisterCallback(callback: sys.esp_hd_cb_t) !void {
+fn setHidDeviceRegisterCallback(callback: sys.esp_hd_cb_t) !void {
     errors.espCheckError(sys.esp_bt_hid_device_register_callback(callback)) catch |e| {
         log.err("HIDD register callback failed: {s}", .{@errorName(e)});
         return BTError.HIDDRegisterCallbackFailed;
     };
 }
 
-inline fn callHIDDHandler(self: *Self, event: HIDDEvent) void {
+fn callHIDDHandler(self: *Self, event: HIDDEvent) void {
     if (self.handler.handleHIDDFn) |handle| {
         handle(self.handler.ctx, event);
     }
@@ -278,7 +278,7 @@ pub fn sendReport(self: *Self, data: []u8) !void {
     };
 }
 
-inline fn classicInit(mac: [6]u8) !void {
+fn classicInit(mac: [6]u8) !void {
     errors.espCheckError(sys.esp_base_mac_addr_set(&mac)) catch |e| {
         log.err("set mac address failed: {s}", .{@errorName(e)});
         return BTError.SetMacAddressFailed;
@@ -295,7 +295,7 @@ inline fn classicInit(mac: [6]u8) !void {
     try bt.Bluedroid.enable();
 }
 
-inline fn classicDeinit() !void {
+fn classicDeinit() !void {
     try bt.Bluedroid.disable();
     try bt.Bluedroid.deinit();
     try bt.Controller.disable();
@@ -402,12 +402,3 @@ export fn gapCallback(
         else => {},
     }
 }
-
-pub const panic = mod.idf.esp_panic.panic;
-pub const std_options: std.Options = .{
-    .log_level = switch (builtin.mode) {
-        .Debug => .debug,
-        else => .info,
-    },
-    .logFn = mod.idf.log.espLogFn,
-};

@@ -62,19 +62,19 @@ pub const WifiManager = struct {
         return ptr;
     }
 
-    pub inline fn initInner(self: *Self, ap_auth: *const Auth, sta_auth: *const Auth) !void {
-        // 2. 初始化网络接口
+    pub fn initInner(self: *Self, ap_auth: *const Auth, sta_auth: *const Auth) !void {
+        // 初始化网络接口
         try idf.err.espCheckError(sys.esp_netif_init());
         try idf.event.loopCreateDefault();
 
         _ = sys.esp_netif_create_default_wifi_sta();
         _ = sys.esp_netif_create_default_wifi_ap();
 
-        // 3. 初始化 Wi-Fi 驱动
+        // 初始化 Wi-Fi 驱动
         var wifi_init_cfg = idf.wifi.init_config_default();
         try idf.wifi.init(&wifi_init_cfg);
 
-        // 4. 注册事件回调
+        // 注册事件回调
         self.wifi_event_handler = try idf.event.handlerInstanceRegister(sys.WIFI_EVENT, idf.event.ANY_ID, &onWifiEvent, self);
         errdefer idf.event.handlerInstanceUnregister(
             sys.WIFI_EVENT,
@@ -93,7 +93,7 @@ pub const WifiManager = struct {
             log.err("failed to unregister ip event", .{});
         };
 
-        // 5. 设置为 APSTA 模式
+        // 设置为 APSTA 模式
         try idf.wifi.setMode(.WIFI_MODE_APSTA);
         try self.setAuth(.WIFI_MODE_AP, ap_auth);
         try self.setAuth(.WIFI_MODE_STA, sta_auth);
@@ -108,7 +108,7 @@ pub const WifiManager = struct {
         );
     }
 
-    pub inline fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self) void {
         if (self.g_event_group) |a| a.vEventGroupDelete();
         if (self.ip_event_handler != null)
             idf.event.handlerInstanceUnregister(
@@ -148,15 +148,15 @@ pub const WifiManager = struct {
         return (bits & CONNECTED_BIT) != 0;
     }
 
-    pub inline fn stopWifi(_: *Self) !void {
+    pub fn stopWifi(_: *Self) !void {
         try idf.wifi.stop();
     }
 
-    pub inline fn startWifi(_: *Self) !void {
+    pub fn startWifi(_: *Self) !void {
         try idf.wifi.start();
     }
 
-    pub inline fn applyAuth(self: *Self, mode: idf.wifi.wifi_mode_t, auth: *const Auth) !void {
+    pub fn applyAuth(self: *Self, mode: idf.wifi.wifi_mode_t, auth: *const Auth) !void {
         try self.stopWifi();
         defer self.startWifi() catch {
             log.err("failed to start wifi after apply auth change", .{});
@@ -164,7 +164,7 @@ pub const WifiManager = struct {
         self.setAuth(mode, auth);
     }
 
-    pub inline fn setAuth(self: *Self, mode: idf.wifi.wifi_mode_t, auth: *const Auth) !void {
+    pub fn setAuth(self: *Self, mode: idf.wifi.wifi_mode_t, auth: *const Auth) !void {
         switch (mode) {
             .WIFI_MODE_AP => {
                 if (auth.ssid) |ssid| {
@@ -244,7 +244,7 @@ pub const WifiManager = struct {
     }
 };
 
-inline fn copyZ(dest: []u8, src: []const u8) void {
+fn copyZ(dest: []u8, src: []const u8) void {
     const n = @min(dest.len - 1, src.len);
     @memcpy(dest[0..n], src[0..n]);
     dest[n] = 0;

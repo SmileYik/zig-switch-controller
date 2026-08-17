@@ -115,25 +115,25 @@ pub fn ByteCodeReader(comptime safe_mode: bool) type {
         bytecode_len: usize = 0,
         endian: std.builtin.Endian = .little,
 
-        inline fn setPCNocheck(self: *Self, pc: usize) !void {
+        fn setPCNocheck(self: *Self, pc: usize) !void {
             self.pc = pc;
         }
 
-        inline fn setPCSafe(self: *Self, pc: usize) !void {
+        fn setPCSafe(self: *Self, pc: usize) !void {
             if (pc > self.bytecode_len) return error.PCOverflow;
             try self.setPCNocheck(pc);
         }
 
-        inline fn addPCNocheck(self: *Self, add: usize) !void {
+        fn addPCNocheck(self: *Self, add: usize) !void {
             self.pc += add;
         }
 
-        inline fn addPCSafe(self: *Self, add: usize) !void {
+        fn addPCSafe(self: *Self, add: usize) !void {
             self.pc = try std.math.add(usize, self.pc, add);
             if (self.pc > self.bytecode_len) return error.PCOverflow;
         }
 
-        inline fn setPC(self: *Self, pc: usize) !void {
+        fn setPC(self: *Self, pc: usize) !void {
             if (safe_mode) {
                 try self.setPCSafe(pc);
             } else {
@@ -141,7 +141,7 @@ pub fn ByteCodeReader(comptime safe_mode: bool) type {
             }
         }
 
-        inline fn addPC(self: *Self, add: usize) !void {
+        fn addPC(self: *Self, add: usize) !void {
             if (safe_mode) {
                 try self.addPCSafe(add);
             } else {
@@ -232,7 +232,7 @@ pub fn CommandRunner(comptime CallStack: type) type {
             self.stack.deinit();
         }
 
-        pub inline fn runCommand(self: *Self, command: *const mod.command.Command) void {
+        pub fn runCommand(self: *Self, command: *const mod.command.Command) void {
             // log.info("run command {}", .{std.meta.activeTag(command.*)});
             switch (command.*) {
                 .down => |b| self.controller.pressButton(b.button, .down, b.combine),
@@ -298,7 +298,7 @@ pub fn CommandRunner(comptime CallStack: type) type {
             try self.runByteCodeInner(&reader);
         }
 
-        inline fn runByteCodeInner(self: *Self, reader: anytype) !void {
+        fn runByteCodeInner(self: *Self, reader: anytype) !void {
             self.stack.clear();
 
             while (reader.hasNext()) {

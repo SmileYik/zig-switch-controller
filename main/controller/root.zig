@@ -13,7 +13,7 @@ pub const ButtonTag = Constants.ButtonTag;
 pub const Button = Constants.Button;
 pub const StickType = Constants.StickType;
 
-pub inline fn buttonToByte(btn: Button) u8 {
+pub fn buttonToByte(btn: Button) u8 {
     return switch (btn) {
         .lower => |mask| @ctz(@intFromEnum(mask)),
         .shared => |mask| @as(u8, @ctz(@intFromEnum(mask))) | 0x40,

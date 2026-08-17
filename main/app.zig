@@ -1,5 +1,3 @@
-/// Nintendo Switch Pro Controller Emulation via BT Classic HID Device
-/// Tested on: ESP32 with IDF v6.0 + Zig
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
@@ -54,12 +52,7 @@ export fn app_main() callconv(.c) void {
         allocator,
         "wf",
         mod.Configuration.WifiConfig,
-    ) catch blk: {
-        var default = mod.Configuration.WifiConfig{};
-        default.sta.ssid = "gczjzx";
-        default.sta.pwd = "88888888";
-        break :blk mod.config.DefaultConfig(default);
-    };
+    ) catch mod.config.DefaultConfig(mod.Configuration.WifiConfig{});
     var wifi = mod.wifi.WifiManager.init(
         allocator,
         &.{ .ssid = wifi_config.config.ap.ssid, .password = wifi_config.config.ap.pwd },

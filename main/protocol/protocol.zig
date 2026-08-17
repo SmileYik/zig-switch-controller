@@ -66,29 +66,29 @@ pub fn init(opt: Options) Protocol {
 }
 
 /// get current report buffer array. you should invoke `clearReport()` method after you send this report.
-pub inline fn getReport(self: *Protocol) *[Constants.MAX_REPORT_SIZE]u8 {
+pub fn getReport(self: *Protocol) *[Constants.MAX_REPORT_SIZE]u8 {
     return &self.report;
 }
 
 /// dupe report to your buf and clear self report.
-pub inline fn bufReport(self: *Protocol, dest: *[Constants.MAX_REPORT_SIZE]u8) void {
+pub fn bufReport(self: *Protocol, dest: *[Constants.MAX_REPORT_SIZE]u8) void {
     @memcpy(dest, &self.report);
     self.setEmptyReport();
 }
 
 /// allocate and dupe self report and return
-pub inline fn allocReport(self: *Protocol, allocator: std.mem.Allocator) ![]u8 {
+pub fn allocReport(self: *Protocol, allocator: std.mem.Allocator) ![]u8 {
     var report = try allocator.alloc(u8, Constants.MAX_REPORT_SIZE);
     self.bufReport(report[0..Constants.MAX_REPORT_SIZE]);
     return report;
 }
 
 /// you should invoke this method after get and send report.
-pub inline fn clearReport(self: *Protocol) void {
+pub fn clearReport(self: *Protocol) void {
     self.setEmptyReport();
 }
 
-inline fn setEmptyReport(self: *Protocol) void {
+fn setEmptyReport(self: *Protocol) void {
     @memset(&self.report, 0);
     self.report[0] = 0xA1;
 }
@@ -145,17 +145,17 @@ pub fn processCommands(self: *Protocol, data: []const u8) void {
     }
 }
 
-pub inline fn setSubcommandReply(self: *Protocol) void {
+pub fn setSubcommandReply(self: *Protocol) void {
     self.report[1] = 0x21;
     self.vibrator_report = getRandomVibratorByte();
     self.setStandardInputReport();
 }
 
-pub inline fn setUnknownSubcommand(self: *Protocol, subcommand_id: u8) void {
+pub fn setUnknownSubcommand(self: *Protocol, subcommand_id: u8) void {
     self.report[15] = subcommand_id;
 }
 
-pub inline fn setTimer(self: *Protocol) void {
+pub fn setTimer(self: *Protocol) void {
     const now_us = sys.esp_timer_get_time();
     if (self.last_timestamp_us == 0) {
         self.last_timestamp_us = now_us;
@@ -171,13 +171,13 @@ pub inline fn setTimer(self: *Protocol) void {
     self.last_timestamp_us = now_us;
 }
 
-pub inline fn setFullInputReport(self: *Protocol) void {
+pub fn setFullInputReport(self: *Protocol) void {
     self.report[1] = 0x30;
     self.setStandardInputReport();
     self.setImuData();
 }
 
-pub inline fn setStandardInputReport(self: *Protocol) void {
+pub fn setStandardInputReport(self: *Protocol) void {
     self.setTimer();
 
     if (self.device_info_queried) {
@@ -192,19 +192,19 @@ pub inline fn setStandardInputReport(self: *Protocol) void {
     }
 }
 
-pub inline fn setButtonInputs(self: *Protocol, upper: u8, shared: u8, lower: u8) void {
+pub fn setButtonInputs(self: *Protocol, upper: u8, shared: u8, lower: u8) void {
     @memcpy(self.report[4..7], &[_]u8{ upper, shared, lower });
 }
 
-pub inline fn setLeftStickInputs(self: *Protocol, left: [3]u8) void {
+pub fn setLeftStickInputs(self: *Protocol, left: [3]u8) void {
     @memcpy(self.report[7..10], &left);
 }
 
-pub inline fn setRightStickInputs(self: *Protocol, right: [3]u8) void {
+pub fn setRightStickInputs(self: *Protocol, right: [3]u8) void {
     @memcpy(self.report[10..13], &right);
 }
 
-pub inline fn setDeviceInfo(self: *Protocol) void {
+pub fn setDeviceInfo(self: *Protocol) void {
     @memcpy(self.report[14..20], &[_]u8{
         // ACK
         0x82,
@@ -225,12 +225,12 @@ pub inline fn setDeviceInfo(self: *Protocol) void {
     @memcpy(self.report[26..28], &[_]u8{0x01} ** 2);
 }
 
-pub inline fn setShipment(self: *Protocol) void {
+pub fn setShipment(self: *Protocol) void {
     self.report[14] = 0x80;
     self.report[15] = 0x08;
 }
 
-pub inline fn toggleImu(self: *Protocol, message: Report) void {
+pub fn toggleImu(self: *Protocol, message: Report) void {
     if (message.subcommand.len > 1 and message.subcommand[1] == 0x01) {
         self.imu_enabled = true;
     } else {
@@ -240,12 +240,12 @@ pub inline fn toggleImu(self: *Protocol, message: Report) void {
     self.report[15] = 0x40;
 }
 
-pub inline fn setImuData(self: *Protocol) void {
+pub fn setImuData(self: *Protocol) void {
     if (!self.imu_enabled) return;
     @memcpy(self.report[14 .. 14 + Constants.IMU_DATA.len], &Constants.IMU_DATA);
 }
 
-pub inline fn spiRead(self: *Protocol, message: Report) void {
+pub fn spiRead(self: *Protocol, message: Report) void {
     if (message.subcommand.len < 6) return;
 
     const addr_bottom = message.subcommand[1];
@@ -311,7 +311,7 @@ pub inline fn spiRead(self: *Protocol, message: Report) void {
     }
 }
 
-pub inline fn setMode(self: *Protocol, message: Report) void {
+pub fn setMode(self: *Protocol, message: Report) void {
     const data = [_]u8{ 0x80, 0x03 };
     @memcpy(self.report[14..16], &data);
 
@@ -325,18 +325,18 @@ pub inline fn setMode(self: *Protocol, message: Report) void {
     }
 }
 
-pub inline fn setTriggerButtons(self: *Protocol) void {
+pub fn setTriggerButtons(self: *Protocol) void {
     self.report[14] = 0x83;
     self.report[15] = 0x04;
 }
 
-pub inline fn enableVibration(self: *Protocol) void {
+pub fn enableVibration(self: *Protocol) void {
     self.report[14] = 0x82;
     self.report[15] = 0x48;
     self.vibration_enabled = true;
 }
 
-pub inline fn setPlayerLights(self: *Protocol, message: Report) void {
+pub fn setPlayerLights(self: *Protocol, message: Report) void {
     const data = [_]u8{ 0x80, 0x30 };
     @memcpy(self.report[14..16], &data);
 
@@ -351,12 +351,12 @@ pub inline fn setPlayerLights(self: *Protocol, message: Report) void {
     }
 }
 
-pub inline fn setNfcIrState(self: *Protocol) void {
+pub fn setNfcIrState(self: *Protocol) void {
     const data = [_]u8{ 0x80, 0x22 };
     @memcpy(self.report[14..16], &data);
 }
 
-pub inline fn setNfcIrConfig(self: *Protocol) void {
+pub fn setNfcIrConfig(self: *Protocol) void {
     const payload = [_]u8{
         0xA0, // Header
         0x21, // Subcommand
@@ -367,12 +367,12 @@ pub inline fn setNfcIrConfig(self: *Protocol) void {
     self.report[49] = 0xC8;
 }
 
-inline fn getRandomVibratorByte() u8 {
+fn getRandomVibratorByte() u8 {
     const rand_idx = @as(usize, @intCast(sys.esp_random() % VIBRATOR_BYTES.len));
     return VIBRATOR_BYTES[rand_idx];
 }
 
-pub inline fn combine(masks: anytype) u8 {
+pub fn combine(masks: anytype) u8 {
     var mask: u8 = 0;
     inline for (masks) |bit| {
         mask |= @intFromEnum(bit);

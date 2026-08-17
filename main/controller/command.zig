@@ -101,7 +101,7 @@ pub const CommandPack = struct {
     }
 };
 
-pub inline fn deinitCommands(allocator: std.mem.Allocator, commands: *Commands) void {
+pub fn deinitCommands(allocator: std.mem.Allocator, commands: *Commands) void {
     defer commands.deinit(allocator);
     for (commands.items) |*command|
         deinitCommand(allocator, command);

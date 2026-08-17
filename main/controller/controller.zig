@@ -75,7 +75,7 @@ pub fn deinit(self: *Controller) void {
     self.allocator.destroy(self);
 }
 
-inline fn packetUnlocked(self: *Controller) ReportType {
+fn packetUnlocked(self: *Controller) ReportType {
     return .{
         .input = .{
             .lower = self.button_lower,
@@ -192,7 +192,7 @@ pub fn setHeartbeat(self: *Controller, flag: bool) void {
 }
 
 /// set button bit. if state is press then set bit to `1`, else set bit to `0`.
-inline fn setButtonBit(byte: u8, mask: u8, state: mod.ButtonState) u8 {
+fn setButtonBit(byte: u8, mask: u8, state: mod.ButtonState) u8 {
     return switch (state) {
         .down => byte | mask,
         .up => byte & ~mask,
@@ -206,7 +206,7 @@ test "setButtonBit" {
     try ExpectEqual(0xA3, setButtonBit(0xB3, 0x10, .up));
 }
 
-inline fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
+fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration) [3]u8 {
     const fx = @as(f32, @floatFromInt(calibration.center_x)) + @abs(x) *
         if (x < 0)
             @as(f32, @floatFromInt(calibration.min_x))
@@ -232,7 +232,7 @@ inline fn calibratedPositionInner(x: f32, y: f32, calibration: StickCalibration)
     };
 }
 
-pub inline fn calibratedPosition(x: i8, y: i8, calibration: StickCalibration) [3]u8 {
+pub fn calibratedPosition(x: i8, y: i8, calibration: StickCalibration) [3]u8 {
     return calibratedPositionInner(
         std.math.clamp(@as(f32, @floatFromInt(x)) / 100.0, -1.0, 1.0),
         std.math.clamp(@as(f32, @floatFromInt(y)) / 100.0, -1.0, 1.0),

@@ -5,7 +5,27 @@
 
 ## 目录
 
-
+- [Zig Switch Controller](#zig-switch-controller)
+  - [目录](#目录)
+  - [状态](#状态)
+  - [功能](#功能)
+  - [架构](#架构)
+  - [构建](#构建)
+    - [环境准备](#环境准备)
+    - [编译](#编译)
+    - [烧录](#烧录)
+  - [配置信息](#配置信息)
+  - [🌐 HTTP API](#-http-api)
+  - [📡 Bluetooth HID](#-bluetooth-hid)
+  - [命令脚本](#命令脚本)
+    - [基础按键输入](#基础按键输入)
+    - [组合按键输入](#组合按键输入)
+    - [摇杆输入](#摇杆输入)
+    - [重复循环](#重复循环)
+    - [重置状态](#重置状态)
+    - [时间单位](#时间单位)
+  - [致谢](#致谢)
+  - [声明](#声明)
 
 ## 状态
 
@@ -66,7 +86,7 @@
 - CMake
 - Ninja
 - ESP-IDF 6.0.2
-- [Patched-Zig-Espressif-0.16.0]**:** 原 `Zig-Espressif` 缺少 Xtensa 架构的部分功能.
+- [Patched-Zig-Espressif-0.16.0]
 
 ### 编译
 
@@ -236,7 +256,7 @@ WAIT 100
 
 本项目仅作为个人学习研究为目的
 
-[Patched-Zig-Espressif-0.16.0]: https://github.com/SmileYik/zig-espressif-bootstrap/actions/runs/31456526064
+[Patched-Zig-Espressif-0.16.0]: https://github.com/SmileYik/zig-espressif-bootstrap/releases/tag/0.16.0
 [zig-espressif-bootstrap]: https://github.com/kassane/zig-espressif-bootstrap
 [zig-esp-idf-sample]: https://github.com/kassane/zig-esp-idf-sample
 [nxbt]: https://github.com/Brikwerk/nxbt

@@ -1,150 +1,243 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kassane/zig-esp-idf-sample)
+# Zig Switch Controller
 
-# Using Zig Language & Toolchain with ESP-IDF
+一个运行在 **ESP32-WROOM-32D** 上的 Nintendo Switch Pro Controller 模拟器,
+由 **Zig 0.16.0 + ESP-IDF + ESP32 + Bluetooth Classic HID** 强力驱动.
 
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-H4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
-
-## STATUS: Experimental
-
-## Description
-
-This project aims to integrate Zig language and toolchain with the [Espressif IoT Development Framework](https://github.com/espressif/esp-idf) for enhanced development capabilities on ESP32 and its variants.
-
-More information about building and using Zig with ESP-IDF can be found in the [documentation](docs/getting-started.md).
-
-## Prerequisites
-
-- [Zig](https://ziglang.org/download) toolchain - v0.16.0 or master
-- [ESP-IDF](https://github.com/espressif/esp-idf) - v5.x or v6.x or master
-
-### Targets Allowed
-
-<table>
-<thead>
-  <tr>
-    <th>Target</th>
-    <th>Architecture</th>
-    <th>Features</th>
-    <th>Zig Build Configuration</th>
-  </tr>
-</thead>
-<tbody>
-  <tr>
-    <td><strong>ESP32</strong></td>
-    <td>Xtensa LX6</td>
-    <td>Dual-core, WiFi, BT Classic, BLE</td>
-    <td><code>-Dtarget=xtensa-freestanding-none -Dcpu=esp32</code></td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-S2</strong></td>
-    <td>Xtensa LX7</td>
-    <td>Single-core, WiFi, USB OTG</td>
-    <td><code>-Dtarget=xtensa-freestanding-none -Dcpu=esp32s2</code></td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-S3</strong></td>
-    <td>Xtensa LX7</td>
-    <td>Dual-core, WiFi, BLE 5.0, USB OTG, AI</td>
-    <td><code>-Dtarget=xtensa-freestanding-none -Dcpu=esp32s3</code></td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-C2</strong></td>
-    <td>RISC-V</td>
-    <td>Single-core, WiFi, BLE 5.0, Low-cost</td>
-    <td rowspan="2"><code>-Dtarget=riscv32-freestanding-none -Dcpu=generic_rv32+m+c+zicsr+zifencei</code></td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-C3</strong></td>
-    <td>RISC-V</td>
-    <td>Single-core, WiFi, BLE 5.0, Low-power</td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-C5</strong></td>
-    <td>RISC-V</td>
-    <td>Single-core, WiFi 6, BLE 5.0</td>
-    <td rowspan="5"><code>-Dtarget=riscv32-freestanding-none -Dcpu=generic_rv32+m+a+c+zicsr+zifencei</code></td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-C6</strong></td>
-    <td>RISC-V</td>
-    <td>Single-core, WiFi 6, BLE 5.0, Zigbee, Thread</td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-C61</strong></td>
-    <td>RISC-V</td>
-    <td>Single-core, WiFi 6, BLE 5.0, Low-cost</td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-H2</strong></td>
-    <td>RISC-V</td>
-    <td>BLE 5.0, Zigbee 3.0, Thread, No WiFi</td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-H21</strong></td>
-    <td>RISC-V</td>
-    <td>BLE 5.0, Zigbee 3.0, Thread, No WiFi</td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-H4</strong></td>
-    <td>RISC-V</td>
-    <td>BLE 5.2, Zigbee, Thread, FPU, No WiFi</td>
-    <td><code>-Dtarget=riscv32-freestanding-eabihf -Dcpu=esp32h4</code> (Espressif fork) / <code>generic_rv32+m+a+c+f+zicsr+zifencei</code> (upstream)</td>
-  </tr>
-  <tr>
-    <td><strong>ESP32-P4</strong></td>
-    <td>RISC-V</td>
-    <td>Dual-core, AI, DSP, FPU, No WiFi/BT</td>
-    <td><code>-Dtarget=riscv32-freestanding-eabihf -Dcpu=esp32p4</code> (Espressif fork) / <code>generic_rv32+m+a+c+f+zicsr+zifencei</code> (upstream)</td>
-  </tr>
-</tbody>
-</table>
-
-> [!WARNING]
-> **Xtensa Architecture Support**
-> 
-> The upstream [Zig compiler](https://ziglang.org/download) (LLVM backend) does not support Xtensa architecture. For ESP32, ESP32-S2, and ESP32-S3 targets, you must use the [Espressif Zig fork](https://github.com/kassane/zig-espressif-bootstrap/releases).
-> 
-> - **RISC-V targets (all variants):** Works with upstream Zig ✅ (uses generic_rv32 fallback); named CPU models available with Espressif fork
-> - **Xtensa targets (ESP32/S2/S3):** Requires [zig-xtensa](https://github.com/kassane/zig-espressif-bootstrap/releases) (auto-downloaded)
-> 
-> The build system automatically downloads the correct toolchain for your target.
+## 目录
 
 
-### Key Features:
 
-- **Zig Language Integration**: Use the Zig programming language to write firmware code. It provides modern language features such as comptime, meta-programming, and error handling.
+## 状态
 
-- **Zig Toolchain Integration**: The Zig toolchain can be used to build zig libraries and executables, and can also be integrated with the ESP-IDF build system. Also, system compiler and linker can be replaced to `zig cc`/`zig c++`.
-  - **Note:** For C++ support, zig toolchain uses `llvm-libc++` ABI by default.
+目前还在处于实验性探索阶段.
 
-- **ESP-IDF Compatibility**: Seamlessly integrate Zig with the ESP-IDF framework, allowing developers to leverage the rich set of APIs and functionalities provided by ESP-IDF for IoT development.
+## 功能
 
-- **Build System Configuration**: Using CMake to build Zig libraries allows easy integration with existing ESP-IDF projects while providing efficient dependency management and build configuration.
+- 🎮 **Nintendo Switch Pro Controller Emulator**
+- 📡 **Bluetooth Classic HID**
+- 🕹️ 按键、组合键、摇杆控制
+- 🌐 Wi-Fi APSTA
+- 🚀 HTTP REST API
+- 💾 ESP-IDF NVS 配置
 
-- **Cross-Platform Development**: Facilitate development across various ESP32 variants including ESP32-C2, ESP32-C3, ESP32-C5, ESP32-C6, ESP32-H2, ESP32-P4, ESP32-S2, and ESP32-S3, ensuring broad compatibility and versatility.
+## 架构
 
+```text
+                         ┌─────────────────────┐
+                         │       ESP32         │
+                         │   Zig + ESP-IDF     │
+                         └──────────┬──────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+              ▼                     ▼                     ▼
+        ┌───────────┐        ┌────────────┐       ┌─────────────┐
+        │   Wi-Fi   │        │ Bluetooth  │       │    NVS      │
+        │  AP / STA │        │ Classic HID│       │   Config    │
+        └─────┬─────┘        └─────┬──────┘       └─────────────┘
+              │                    │
+              ▼                    ▼
+        ┌─────────────┐      ┌──────────────┐
+        │ HTTP Server │      │ ReportQueue  │
+        └──────┬──────┘      └──────┬───────┘
+               │                    │
+               ▼                    ▼
+        ┌─────────────────────────────────┐
+        │          Controller             │
+        │  Button / Stick / Input State  │
+        └───────────────┬─────────────────┘
+                        │
+                        ▼
+              ┌──────────────────┐
+              │ Switch Protocol  │
+              │  HID / Reports   │
+              └────────┬─────────┘
+                       │
+                       ▼
+              ┌──────────────────┐
+              │ Nintendo Switch  │
+              └──────────────────┘
+```
 
-### About Allocators
+## 构建
 
-> [!NOTE]
->
-> Asserts allocations are within `@alignOf(std.c.max_align_t)` and directly calls
-> `malloc`/`free`. Does not attempt to utilize `malloc_usable_size`.
->
-> - `std.heap.raw_c_allocator` allocator is safe to use as the backing allocator with `std.heap.ArenaAllocator` for example and is more optimal in such a case than `std.heap.c_allocator`. - ref.: [std-doc](https://ziglang.org/documentation/0.15.2/std/#std.heap.raw_c_allocator)
->
-> - `std.heap.ArenaAllocator` takes an existing allocator, wraps it, and provides an interface where you can allocate without freeing, and then free it all together. - ref.: [std-doc](https://ziglang.org/documentation/master/std/#std.heap.ArenaAllocator)
->
-> **Custom Allocators** (based on `std.heap.raw_c_allocator`)
->
-> - `idf.heap.HeapCapsAllocator` - ref.: [espressif-doc](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/mem_alloc.html)
-> - `idf.heap.MultiHeapAllocator` - ref.: [espressif-doc](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/mem_alloc.html)
-> - `idf.heap.VPortAllocator` - ref.: [FreeRTOS-doc](https://www.freertos.org/a00111.html)
+### 环境准备
 
+- CMake
+- Ninja
+- ESP-IDF 6.0.2
+- [Patched-Zig-Espressif-0.16.0]**:** 原 `Zig-Espressif` 缺少 Xtensa 架构的部分功能.
 
-### License
+### 编译
 
-This project is licensed twice:
-- [Apache](LICENSE-APACHE)
-- [MIT-0](LICENSE-MIT)
+在激活 ESP-IDF 环境以及导出环境变量 `ZIG_DIR` 为你的 ZIG 工具链路径的命令行终端中, 使用以下指令进行编译:
+
+```shell
+idf.py set-target esp32
+idf.py build
+```
+
+若要指定优化等级, 则可以使用
+
+```shell
+idf.py reconfigure -DCMAKE_BUILD_TYPE=ReleaseSmall
+idf.py build
+```
+
+### 烧录
+
+烧录和正常烧录方法一致, 依旧在相同的环境的命令行终端中, 使用
+
+```shell
+idf.py -p <PORT> flash
+```
+
+## 配置信息
+
+这里还没有整理出来, 可能需要自己先摸索看看开哪些开关.
+
+```shell
+idf.py menuconfig
+```
+
+在菜单中需要开启以下功能(不一定准确):
+
+- Classic Bluetooth
+- Hidd-host
+- Wifi
+- Main Stack Size: 10240
+- HID Stack Size: 8192
+- RTOS Event Task Stack Size: 8192 
+
+## 🌐 HTTP API
+
+设备启动 HTTP Server 后，可以通过 HTTP API 控制 Controller。
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/` | API / Web 根入口 |
+| `GET` | `/api/config/wifi` | 获取 Wi-Fi 配置 |
+| `POST` | `/api/config/wifi` | 更新 Wi-Fi 配置 |
+| `POST` | `/api/command/compile/base64` | 命令脚本 → Base64(URL_SAFE) 编码字节码 |
+| `POST` | `/api/command/compile/hex` | 命令脚本 → 十六进制编码字节码 |
+| `POST` | `/api/command/test/base64` | 测试 Base64(URL_SAFE) 编码字节码 |
+| `POST` | `/api/command/run/sync/raw` | 同步执行命令脚本 |
+
+## 📡 Bluetooth HID
+
+ESP32 通过 Bluetooth Classic HID Device 模拟：
+
+```text
+Nintendo Pro Controller
+```
+
+默认设备信息：
+
+```text
+Name:        Pro Controller
+Description: Gamepad
+Provider:    Nintendo
+```
+
+## 命令脚本
+
+可以使用简单的文本命令控制手柄。
+
+### 基础按键输入
+
+按下 **A** 等待 100 毫秒后弹起.
+
+```text
+DOWN A
+WAIT 100ms
+UP A
+```
+
+等价于
+
+```text
+TAP 100ms A
+```
+
+### 组合按键输入
+
+按下 **L** 的同时一起按下 **R**, 并等待 100 毫秒后弹起.
+
+```text
+DOWN L R
+WAIT 100ms
+UP L R
+```
+
+等价于
+
+```text
+TAP 100ms L R
+```
+
+### 摇杆输入
+
+```text
+STICK <摇杆> <X轴> <Y轴>
+```
+
+- 摇杆类型:
+  - 左摇杆: `left_stick`
+  - 右摇杆: `right_stick`
+- X/Y 轴: [-100, 100] 整数
+
+### 重复循环
+
+循环 5 次按下 **A**
+
+```text
+REPEAT 5
+    DOWN A
+    WAIT 100ms
+    UP A
+    WAIT 100ms
+END
+```
+
+### 重置状态
+
+- 重置按键: `RESET_BUTTON`
+- 摇杆归位: `RESET_STICK <摇杆>`
+- 重置所有: `RESET_ALL`
+
+### 时间单位
+
+支持：
+
+```text
+100ms
+1s
+1.5s
+2m
+1h
+```
+
+如果不指定单位，则默认使用毫秒：
+
+```text
+WAIT 100
+```
+
+## 致谢
+
+这个项目存在离不开这些仓库的所有贡献者的奉献: 
+
+- [zig-espressif-bootstrap]
+- [zig-esp-idf-sample]
+- [nxbt]
+- [nuxbt]
+
+## 声明
+
+本项目仅作为个人学习研究为目的
+
+[Patched-Zig-Espressif-0.16.0]: https://github.com/SmileYik/zig-espressif-bootstrap/actions/runs/31456526064
+[zig-espressif-bootstrap]: https://github.com/kassane/zig-espressif-bootstrap
+[zig-esp-idf-sample]: https://github.com/kassane/zig-esp-idf-sample
+[nxbt]: https://github.com/Brikwerk/nxbt
+[nuxbt]: https://github.com/hannahbee91/nuxbt

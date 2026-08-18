@@ -42,6 +42,8 @@ export fn app_main() callconv(.c) void {
     // defer arena.deinit();
     const allocator = heap.allocator();
 
+    log.info("----------------- memory: {d}/{d}", .{ heap.freeSize(), heap.totalSize() });
+
     idf.nvs.flashInitOrErase() catch |err| {
         log.err("NVS 初始化失败: {s}", .{@errorName(err)});
         return;
@@ -115,13 +117,15 @@ export fn app_main() callconv(.c) void {
     http_srv.registerUris(http_action.getUris()) catch |err| {
         log.err("Http action 注册失败: {s}", .{@errorName(err)});
     };
-    http_action.startConsume() catch |err| {
-        log.err("Http action 队伍列表启动失败: {s}", .{@errorName(err)});
-    };
+    // http_action.startConsume() catch |err| {
+    //     log.err("Http action 队伍列表启动失败: {s}", .{@errorName(err)});
+    // };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
 
     _ = wifi.waitForConnect(60000);
+
+    log.info("----------------- memory: {d}/{d}", .{ heap.freeSize(), heap.totalSize() });
 
     while (!queue.is_connected.load(.acquire)) {
         idf.rtos.Task.delayMs(1000);

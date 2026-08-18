@@ -28,7 +28,7 @@ allocator: std.mem.Allocator,
 controller: *mod.controller.Controller,
 queue: Queue,
 
-uris: [8]mod.http.Uri = [_]mod.http.Uri{
+uris: [9]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -87,6 +87,12 @@ uris: [8]mod.http.Uri = [_]mod.http.Uri{
         .uri = "/api/command/queue/base64",
         .method = sys.HTTP_POST,
         .handler = &postCommandEnqueueBase64,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/tomodachi/draw",
+        .method = sys.HTTP_POST,
+        .handler = &postTomodachiDraw,
         .user_ctx = null,
     },
 },
@@ -414,6 +420,33 @@ export fn postCommandEnqueueBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
     return sys.ESP_OK;
 }
 
+/// POST /api/tomodachi/draw
+export fn postTomodachiDraw(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var body_opt = self.readBodyAlloc(self.allocator, req);
+    if (body_opt) |*array| {
+        var drawer = mod.TomodachiLifeDrawer.init(
+            self.allocator,
+            self.controller,
+            array.*,
+        ) catch {
+            array.deinit(self.allocator);
+            self.sendJsonError(req, 500, "create tomodachi drawer failed");
+            return sys.ESP_FAIL;
+        };
+        drawer.start() catch {
+            drawer.deinit();
+            self.sendJsonError(req, 500, "start tomodachi drawer failed");
+            return sys.ESP_FAIL;
+        };
+        self.sendStructAsJson(req, null, "running!");
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
+    return sys.ESP_OK;
+}
+
 fn sendError(
     _: *Self,
     req: [*c]mod.http.Req,
@@ -516,6 +549,28 @@ fn readBody(
             break;
     }
     return if (i > 0) buffer[0..i] else null;
+}
+
+fn readBodyAlloc(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    req: [*c]mod.http.Req,
+) ?std.ArrayList(u8) {
+    var buf: [1024]u8 = undefined;
+    var array: std.ArrayList(u8) = .empty;
+    errdefer array.deinit(allocator);
+
+    while (true) {
+        const len = idf.http.Server.Request.receiver(req, &buf, buf.len);
+        if (len > 0) {
+            array.appendSlice(allocator, buf[0..@as(usize, @intCast(len))]) catch |e| {
+                self.sendError(req, "Read-body-failed", e);
+                defer array.deinit(allocator);
+                return null;
+            };
+        } else break;
+    }
+    return array;
 }
 
 pub fn startConsume(self: *Self) !void {

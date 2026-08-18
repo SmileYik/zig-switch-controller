@@ -7,6 +7,7 @@ const runner = mod.controller.command.runner;
 const CommandRunner = runner.CommandRunner(runner.CallStackStatic(8));
 
 const MAX_BODY_SIZE = 4096;
+const MAX_BYTECODE_SIZE = 4096;
 const QUEUE_CAPACITY = 2;
 const Queue = mod.Queue(ByteCode, QUEUE_CAPACITY);
 
@@ -27,7 +28,7 @@ allocator: std.mem.Allocator,
 controller: *mod.controller.Controller,
 queue: Queue,
 
-uris: [10]mod.http.Uri = [_]mod.http.Uri{
+uris: [8]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -46,18 +47,18 @@ uris: [10]mod.http.Uri = [_]mod.http.Uri{
         .handler = &postWifiConfig,
         .user_ctx = null,
     },
-    .{
-        .uri = "/api/command/compile/base64",
-        .method = sys.HTTP_POST,
-        .handler = &postCommandCompileBase64,
-        .user_ctx = null,
-    },
-    .{
-        .uri = "/api/command/compile/hex",
-        .method = sys.HTTP_POST,
-        .handler = &postCommandCompileHex,
-        .user_ctx = null,
-    },
+    // .{
+    //     .uri = "/api/command/compile/base64",
+    //     .method = sys.HTTP_POST,
+    //     .handler = &postCommandCompileBase64,
+    //     .user_ctx = null,
+    // },
+    // .{
+    //     .uri = "/api/command/compile/hex",
+    //     .method = sys.HTTP_POST,
+    //     .handler = &postCommandCompileHex,
+    //     .user_ctx = null,
+    // },
     .{
         .uri = "/api/command/test/base64",
         .method = sys.HTTP_POST,
@@ -138,7 +139,9 @@ export fn getWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const template =
         \\{{"ap":{{"ssid": "{s}", "pwd":"{s}"}},"sta":{{"ssid": "{s}", "pwd":"{s}"}}}}
     ;
-    const msg = std.fmt.allocPrint(self.allocator, template, .{
+
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, template, .{
         loaded.config.ap.ssid,
         loaded.config.ap.pwd,
         loaded.config.sta.ssid,
@@ -287,8 +290,8 @@ export fn postCommandRunSyncRaw(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
             defer r.deinit();
 
             self.controller.setHeartbeat(false);
+            defer self.controller.setHeartbeat(true);
             r.runCommandPack(pack);
-            self.controller.setHeartbeat(true);
         }
         self.sendStructAsJson(req, null, "complete!");
     } else {
@@ -374,6 +377,7 @@ export fn postCommandEnqueueBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
         };
 
         dec.decode(buf, body) catch {
+            self.allocator.free(buf);
             self.sendJsonError(req, 500, "decode-base64-failed");
             return sys.ESP_FAIL;
         };
@@ -381,10 +385,12 @@ export fn postCommandEnqueueBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
         self.queue.enqueue(.{ .allocator = self.allocator, .bytes = buf }) catch |err|
             switch (err) {
                 Queue.QueueError.Full => {
+                    self.allocator.free(buf);
                     self.sendJsonError(req, 500, "full");
                     return sys.ESP_FAIL;
                 },
                 else => {
+                    self.allocator.free(buf);
                     self.sendJsonError(req, 500, "enqueue-error");
                     return sys.ESP_FAIL;
                 },
@@ -398,7 +404,7 @@ export fn postCommandEnqueueBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
             QUEUE_CAPACITY,
             self.queue.spacesAvailable(),
         }) catch |e| {
-            self.sendError(req, "parsed-wifi-config-failed", e);
+            self.sendError(req, "msg buf too small", e);
             return sys.ESP_FAIL;
         };
         self.sendStructAsJson(req, msg, "enqueued!");

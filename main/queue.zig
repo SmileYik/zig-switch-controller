@@ -124,5 +124,9 @@ pub fn Queue(comptime T: type, comptime capacity: usize) type {
             }
             return null;
         }
+
+        pub fn spacesAvailable(self: *Self) usize {
+            return rtos.Queue.spacesAvailable(self.xqueue);
+        }
     };
 }

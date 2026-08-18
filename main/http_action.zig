@@ -4,16 +4,30 @@ const sys = mod.sys;
 const idf = mod.idf;
 
 const runner = mod.controller.command.runner;
-const CommandRunner = runner.CommandRunner(runner.CallStackAlloc);
+const CommandRunner = runner.CommandRunner(runner.CallStackStatic(8));
+
+const MAX_BODY_SIZE = 4096;
+const QUEUE_CAPACITY = 2;
+const Queue = mod.Queue(ByteCode, QUEUE_CAPACITY);
 
 const log = std.log.scoped(.http_action);
+
+const ByteCode = struct {
+    bytes: []const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *ByteCode) void {
+        self.allocator.free(self.bytes);
+    }
+};
 
 const Self = @This();
 
 allocator: std.mem.Allocator,
 controller: *mod.controller.Controller,
+queue: Queue,
 
-uris: [8]mod.http.Uri = [_]mod.http.Uri{
+uris: [10]mod.http.Uri = [_]mod.http.Uri{
     .{
         .uri = "/",
         .method = sys.HTTP_GET,
@@ -62,13 +76,29 @@ uris: [8]mod.http.Uri = [_]mod.http.Uri{
         .handler = &postCommandRunSyncRaw,
         .user_ctx = null,
     },
+    .{
+        .uri = "/api/command/queue",
+        .method = sys.HTTP_GET,
+        .handler = &getCommandQueueStatus,
+        .user_ctx = null,
+    },
+    .{
+        .uri = "/api/command/queue/base64",
+        .method = sys.HTTP_POST,
+        .handler = &postCommandEnqueueBase64,
+        .user_ctx = null,
+    },
 },
 
 pub fn init(
     allocator: std.mem.Allocator,
     controller: *mod.controller.Controller,
-) Self {
-    return .{ .allocator = allocator, .controller = controller };
+) !Self {
+    return .{
+        .allocator = allocator,
+        .controller = controller,
+        .queue = try .init(.{ .allocator = allocator }),
+    };
 }
 
 pub fn getUris(self: *Self) []const mod.http.Uri {
@@ -126,14 +156,12 @@ export fn getWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
 export fn postWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var array_opt = self.readBody(self.allocator, req);
-    if (array_opt) |*body| {
-        defer body.deinit(self.allocator);
-
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
         var parsed = std.json.parseFromSlice(
             mod.Configuration.WifiConfig,
             self.allocator,
-            body.items,
+            body,
             .{ .ignore_unknown_fields = true },
         ) catch |e| {
             self.sendError(req, "parsed-body-failed", e);
@@ -156,15 +184,13 @@ export fn postWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
 export fn postCommandCompileBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var array_opt = self.readBody(self.allocator, req);
-    if (array_opt) |*body| {
-        defer body.deinit(self.allocator);
-
-        log.debug("compile command to base64: {s}", .{body.items});
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
+        log.debug("compile command to base64: {s}", .{body});
 
         var opt = mod.controller.command.compileToBase64(
             self.allocator,
-            body.items[0..body.items.len],
+            body,
         ) catch |e| {
             self.sendError(req, "compile-script-to-base64-failed", e);
             return sys.ESP_FAIL;
@@ -185,15 +211,13 @@ export fn postCommandCompileBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
 export fn postCommandCompileHex(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var array_opt = self.readBody(self.allocator, req);
-    if (array_opt) |*body| {
-        defer body.deinit(self.allocator);
-
-        log.debug("compile command to hex: {s}", .{body.items});
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
+        log.debug("compile command to hex: {s}", .{body});
 
         var opt = mod.controller.command.compileToHex(
             self.allocator,
-            body.items[0..body.items.len],
+            body,
         ) catch |e| {
             self.sendError(req, "compile-script-to-hex-failed", e);
             return sys.ESP_FAIL;
@@ -214,12 +238,10 @@ export fn postCommandCompileHex(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
 export fn postCommandTestBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var array_opt = self.readBody(self.allocator, req);
-    if (array_opt) |*body| {
-        defer body.deinit(self.allocator);
-
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
         const dec = std.base64.url_safe.Decoder;
-        const size = dec.calcSizeForSlice(body.items) catch |e| {
+        const size = dec.calcSizeForSlice(body) catch |e| {
             self.sendError(req, "calculate-base64-decode-size-failed", e);
             return sys.ESP_FAIL;
         };
@@ -228,7 +250,7 @@ export fn postCommandTestBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
             return sys.ESP_FAIL;
         };
         defer self.allocator.free(buf);
-        dec.decode(buf, body.items) catch |e| {
+        dec.decode(buf, body) catch |e| {
             self.sendError(req, "decode-base64-failed", e);
             return sys.ESP_FAIL;
         };
@@ -248,21 +270,19 @@ export fn postCommandTestBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
 export fn postCommandRunSyncRaw(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var array_opt = self.readBody(self.allocator, req);
-    if (array_opt) |*body| {
-        var opt = mod.controller.command.parser.parseCommand(self.allocator, body.items) catch |e| {
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
+        var opt = mod.controller.command.parser.parseCommand(self.allocator, body) catch |e| {
             self.sendError(req, "parse-script-failed", e);
-            body.deinit(self.allocator);
             return sys.ESP_FAIL;
         };
 
-        body.deinit(self.allocator);
         if (opt) |*pack| {
             defer pack.deinit();
 
             var r = CommandRunner{
                 .controller = self.controller,
-                .stack = .init(self.allocator),
+                .stack = .{},
             };
             defer r.deinit();
 
@@ -281,12 +301,10 @@ export fn postCommandRunSyncRaw(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_
 export fn postCommandRunSyncBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
 
-    var array_opt = self.readBody(self.allocator, req);
-    if (array_opt) |*body| {
-        defer body.deinit(self.allocator);
-
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
         const dec = std.base64.url_safe.Decoder;
-        const size = dec.calcSizeForSlice(body.items) catch |e| {
+        const size = dec.calcSizeForSlice(body) catch |e| {
             self.sendError(req, "calculate-base64-decode-size-failed", e);
             return sys.ESP_FAIL;
         };
@@ -295,14 +313,14 @@ export fn postCommandRunSyncBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
             return sys.ESP_FAIL;
         };
         defer self.allocator.free(buf);
-        dec.decode(buf, body.items) catch |e| {
+        dec.decode(buf, body) catch |e| {
             self.sendError(req, "decode-base64-failed", e);
             return sys.ESP_FAIL;
         };
 
         var r = CommandRunner{
             .controller = self.controller,
-            .stack = .init(self.allocator),
+            .stack = .{},
         };
         defer r.deinit();
 
@@ -314,6 +332,76 @@ export fn postCommandRunSyncBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_e
         };
 
         self.sendStructAsJson(req, null, "complete test!");
+    } else {
+        self.sendJsonError(req, 500, "not a valid payload");
+    }
+    return sys.ESP_OK;
+}
+
+/// get /api/command/queue
+export fn getCommandQueueStatus(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+    const total = QUEUE_CAPACITY;
+    const space = self.queue.spacesAvailable();
+
+    var buf: [128]u8 = undefined;
+    const template =
+        \\{{"total":{d},"available":{d}}}
+    ;
+    const msg = std.fmt.bufPrint(&buf, template, .{ total, space }) catch |e| {
+        self.sendError(req, "parsed-wifi-config-failed", e);
+        return sys.ESP_FAIL;
+    };
+    self.sendStructAsJson(req, msg, null);
+
+    return sys.ESP_OK;
+}
+
+/// POST /api/command/queue/base64
+export fn postCommandEnqueueBase64(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
+
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (self.readBody(&body_buffer, req)) |body| {
+        const dec = std.base64.url_safe.Decoder;
+        const size = dec.calcSizeForSlice(body) catch {
+            self.sendJsonError(req, 500, "calculate-base64-decode-size-failed");
+            return sys.ESP_FAIL;
+        };
+        const buf = self.allocator.alloc(u8, size) catch {
+            self.sendJsonError(req, 500, "alloc-calculate-base64-decode-size-failed");
+            return sys.ESP_FAIL;
+        };
+
+        dec.decode(buf, body) catch {
+            self.sendJsonError(req, 500, "decode-base64-failed");
+            return sys.ESP_FAIL;
+        };
+
+        self.queue.enqueue(.{ .allocator = self.allocator, .bytes = buf }) catch |err|
+            switch (err) {
+                Queue.QueueError.Full => {
+                    self.sendJsonError(req, 500, "full");
+                    return sys.ESP_FAIL;
+                },
+                else => {
+                    self.sendJsonError(req, 500, "enqueue-error");
+                    return sys.ESP_FAIL;
+                },
+            };
+
+        var msg_buf: [128]u8 = undefined;
+        const template =
+            \\{{"total":{d},"available":{d}}}
+        ;
+        const msg = std.fmt.bufPrint(&msg_buf, template, .{
+            QUEUE_CAPACITY,
+            self.queue.spacesAvailable(),
+        }) catch |e| {
+            self.sendError(req, "parsed-wifi-config-failed", e);
+            return sys.ESP_FAIL;
+        };
+        self.sendStructAsJson(req, msg, "enqueued!");
     } else {
         self.sendJsonError(req, 500, "not a valid payload");
     }
@@ -345,7 +433,7 @@ fn sendJsonError(
     comptime code: u16,
     msg: ?[]const u8,
 ) void {
-    self.sendStructAsJsonInner(req, code, "", false, msg) catch |e| {
+    self.sendStructAsJsonInner(req, code, null, false, msg) catch |e| {
         self.sendError(req, "send-json-error-failed", e);
     };
 }
@@ -373,15 +461,16 @@ fn sendStructAsJson(
 }
 
 fn sendStructAsJsonInner(
-    self: *Self,
+    _: *Self,
     req: [*c]mod.http.Req,
     comptime code: u16,
     value: ?[]const u8,
     has_quote: bool,
     message: ?[]const u8,
 ) !void {
-    const json = try std.fmt.allocPrintSentinel(
-        self.allocator,
+    var buf: [1024:0]u8 = undefined;
+    const json = try std.fmt.bufPrintSentinel(
+        &buf,
         "{{\"code\":{d},\"msg\":\"{s}\",\"data\":{s}{s}{s}}}",
         .{
             code,
@@ -392,7 +481,6 @@ fn sendStructAsJsonInner(
         },
         0,
     );
-    defer self.allocator.free(json);
 
     try idf.http.Server.Response.setHDR(req, "Access-Control-Allow-Origin", "*");
     try idf.http.Server.Response.setHDR(req, "content-type", "application/json");
@@ -400,23 +488,64 @@ fn sendStructAsJsonInner(
 }
 
 fn readBody(
-    self: *Self,
-    allocator: std.mem.Allocator,
+    _: *Self,
+    buffer: anytype,
     req: [*c]mod.http.Req,
-) ?std.ArrayList(u8) {
+) ?[]const u8 {
     var buf: [1024]u8 = undefined;
-    var array: std.ArrayList(u8) = .empty;
-    errdefer array.deinit(allocator);
 
+    var i: usize = 0;
     while (true) {
         const len = idf.http.Server.Request.receiver(req, &buf, buf.len);
-        if (len > 0 or len == sys.HTTPD_SOCK_ERR_TIMEOUT) {
-            array.appendSlice(allocator, buf[0..@as(usize, @intCast(len))]) catch |e| {
-                self.sendError(req, "Read-body-failed", e);
-                defer array.deinit(allocator);
+        if (len > 0) {
+            if (i + @as(usize, @intCast(len)) > buffer.len) {
+                log.err("body too long", .{});
                 return null;
-            };
-        } else break;
+            }
+            @memcpy(buffer[i .. i + @as(usize, @intCast(len))], buf[0..@as(usize, @intCast(len))]);
+            i += @as(usize, @intCast(len));
+        } else if (len == sys.HTTPD_SOCK_ERR_TIMEOUT)
+            continue
+        else
+            break;
     }
-    return array;
+    return if (i > 0) buffer[0..i] else null;
+}
+
+pub fn startConsume(self: *Self) !void {
+    _ = try mod.idf.rtos.Task.create(
+        consumeByteCode,
+        "consume_bytecode",
+        1024 * 4,
+        self,
+        5,
+    );
+}
+
+export fn consumeByteCode(ctx: ?*anyopaque) callconv(.c) void {
+    var self: *Self = @ptrCast(@alignCast(ctx.?));
+
+    var r = CommandRunner{
+        .controller = self.controller,
+        .stack = .{},
+    };
+    defer r.deinit();
+
+    while (true) {
+        while (self.queue.pollWait(std.math.maxInt(u32))) |*item| {
+            defer item.deinit();
+
+            var bytecode = item.value;
+            defer bytecode.deinit();
+
+            log.info("start consuming bytecode!", .{});
+
+            self.controller.setHeartbeat(false);
+            defer self.controller.setHeartbeat(true);
+
+            r.runByteCodeUnsafe(bytecode.bytes) catch |e| {
+                log.err("exception when consuming bytecode: {s}", .{@errorName(e)});
+            };
+        }
+    }
 }

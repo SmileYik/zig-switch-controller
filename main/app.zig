@@ -114,6 +114,7 @@ export fn app_main() callconv(.c) void {
         allocator,
         controller,
         &heap,
+        wifi,
     ) catch |err| {
         log.err("Http action 初始化失败: {s}", .{@errorName(err)});
         return;

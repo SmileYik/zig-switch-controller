@@ -21,14 +21,6 @@ const ByteCode = struct {
     }
 };
 
-const POSTS = .{
-    .{ "/cmd/queue", &postCommandEnqueue },
-    .{ "/cmd/run", &postCommandRunSync },
-    .{ "/cmd/run/raw", &postCommandRunSyncRaw },
-    .{ "/cmd/test", &postCommandTest },
-    .{ "/cfg/wifi", &postWifiConfig },
-};
-
 const Self = @This();
 
 allocator: std.mem.Allocator,
@@ -36,8 +28,15 @@ heap: *idf.heap.HeapCapsAllocator,
 controller: *mod.controller.Controller,
 queue: Queue,
 queue_capacity: u8 = QUEUE_CAPACITY,
+wifi: *mod.wifi.WifiManager,
 
-uris: [5]mod.http.Uri = [_]mod.http.Uri{
+uris: [4]mod.http.Uri = [_]mod.http.Uri{
+    .{
+        .uri = "/",
+        .method = sys.HTTP_GET,
+        .handler = &handleRoot,
+        .user_ctx = null,
+    },
     .{
         .uri = "/api",
         .method = sys.HTTP_OPTIONS,
@@ -51,21 +50,9 @@ uris: [5]mod.http.Uri = [_]mod.http.Uri{
         .user_ctx = null,
     },
     .{
-        .uri = "/",
+        .uri = "/api",
         .method = sys.HTTP_GET,
-        .handler = &handleRoot,
-        .user_ctx = null,
-    },
-    .{
-        .uri = "/api/config/wifi",
-        .method = sys.HTTP_GET,
-        .handler = &getWifiConfig,
-        .user_ctx = null,
-    },
-    .{
-        .uri = "/api/command/queue",
-        .method = sys.HTTP_GET,
-        .handler = &getCommandQueueStatus,
+        .handler = &handleApiGet,
         .user_ctx = null,
     },
 },
@@ -74,12 +61,14 @@ pub fn init(
     allocator: std.mem.Allocator,
     controller: *mod.controller.Controller,
     heap: *idf.heap.HeapCapsAllocator,
+    wifi: *mod.wifi.WifiManager,
 ) !Self {
     return .{
         .allocator = allocator,
         .controller = controller,
         .queue = try .init(.{ .allocator = allocator }),
         .heap = heap,
+        .wifi = wifi,
     };
 }
 
@@ -117,217 +106,52 @@ export fn handleApiOptions(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     return sys.ESP_OK;
 }
 
+fn dispatchAction(
+    self: *Self,
+    req: [*c]mod.http.Req,
+    comptime actions: anytype,
+) !void {
+    var query: [64:0]u8 = undefined;
+    var action_buf: [16:0]u8 = undefined;
+    @memset(&query, 0);
+    @memset(&action_buf, 0);
+
+    try idf.http.Server.Request.getUrlQueryStr(req, &query, query.len);
+    try idf.http.Server.queryKeyValue(&query, "mode", &action_buf, action_buf.len);
+    const action = std.mem.sliceTo(&action_buf, 0);
+
+    inline for (actions) |entry| {
+        if (std.mem.eql(u8, action, entry[0])) {
+            try entry[1](self, req);
+            return;
+        }
+    }
+
+    idf.http.Server.Response.sendError(req, 6, "") catch {};
+}
+
 export fn handleApiPost(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
     var self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
     self.logMemory();
     defer self.logMemory();
 
-    var query: [64:0]u8 = undefined;
-    var mode: [16:0]u8 = undefined;
-    @memset(&query, 0);
-    @memset(&mode, 0);
-
-    idf.http.Server.Request.getUrlQueryStr(req, &query, query.len) catch {};
-    idf.http.Server.queryKeyValue(&query, "mode", &mode, mode.len) catch {};
-
-    inline for (POSTS) |post| {
-        if (std.mem.eql(u8, std.mem.sliceTo(&mode, 0), post[0])) {
-            post[1](self, req) catch |err| {
-                self.sendJsonError(req, 500, @errorName(err));
-            };
-            return sys.ESP_OK;
-        }
-    }
-
-    idf.http.Server.Response.sendError(req, 6, "") catch {};
-    return sys.ESP_OK;
-}
-
-/// GET /api/config/wifi
-export fn getWifiConfig(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
-    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
-    self.logMemory();
-    defer self.logMemory();
-
-    var loaded = mod.config.loadStruct(
-        self.allocator,
-        @tagName(mod.Configuration.Keys.wf),
-        mod.Configuration.WifiConfig,
-    ) catch
-        mod.config.DefaultConfig(mod.Configuration.WifiConfig{});
-    defer loaded.deinit();
-    const template =
-        \\{{"ap":{{"ssid": "{s}", "pwd":"{s}"}},"sta":{{"ssid": "{s}", "pwd":"{s}"}}}}
-    ;
-
-    var buf: [256]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, template, .{
-        loaded.config.ap.ssid,
-        loaded.config.ap.pwd,
-        loaded.config.sta.ssid,
-        loaded.config.sta.pwd,
-    }) catch |e| {
-        self.sendError(req, "parsed-wifi-config-failed", e);
-        return sys.ESP_FAIL;
+    self.dispatchAction(req, POSTS) catch |err| {
+        self.sendJsonError(req, 500, @errorName(err));
     };
 
-    self.sendStructAsJson(req, msg, null);
     return sys.ESP_OK;
 }
 
-/// POST /api/config/wifi
-fn postWifiConfig(self: *Self, req: [*c]mod.http.Req) !void {
+export fn handleApiGet(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
+    var self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
     self.logMemory();
     defer self.logMemory();
 
-    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
-    if (try self.readBody(&body_buffer, req)) |body| {
-        var parsed = std.json.parseFromSlice(
-            mod.Configuration.WifiConfig,
-            self.allocator,
-            body,
-            .{ .ignore_unknown_fields = true },
-        ) catch |e| {
-            self.logError("parsed-body-failed", e);
-            return error.ParseWifiConfigFailed;
-        };
-        defer parsed.deinit();
-
-        mod.config.storeStruct(@tagName(mod.Configuration.Keys.wf), parsed.value) catch |e| {
-            self.logError("store-wifi-config-failed", e);
-            return error.StoreWifiConfigFailed;
-        };
-        self.sendStructAsJson(req, null, "configurate wifi success");
-    }
-    return error.RequestBodyIsNotValid;
-}
-
-/// POST /api/command/test
-fn postCommandTest(self: *Self, req: [*c]mod.http.Req) !void {
-    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
-    if (try self.readBody(&body_buffer, req)) |body| {
-        mod.controller.command.runner.byteCodeTest(self.allocator, body) catch |e| {
-            self.logError("test-failed", e);
-            return error.TestFailed;
-        };
-        self.sendStructAsJson(req, null, "complete test!");
-    }
-    return error.RequestBodyIsNotValid;
-}
-
-/// POST /api/command/run/sync/raw
-fn postCommandRunSyncRaw(self: *Self, req: [*c]mod.http.Req) !void {
-    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
-    if (try self.readBody(&body_buffer, req)) |body| {
-        var opt = mod.controller.command.parser.parseCommand(self.allocator, body) catch |e| {
-            self.logError("parse-script-failed", e);
-            return error.ParseMacroFailed;
-        };
-
-        if (opt) |*pack| {
-            defer pack.deinit();
-
-            var r = CommandRunner{
-                .controller = self.controller,
-                .stack = .{},
-            };
-            defer r.deinit();
-
-            self.controller.setHeartbeat(false);
-            defer self.controller.setHeartbeat(true);
-            r.runCommandPack(pack);
-        }
-        self.sendStructAsJson(req, null, "complete!");
-    }
-    return error.RequestBodyIsNotValid;
-}
-
-/// POST /api/command/run/sync
-fn postCommandRunSync(self: *Self, req: [*c]mod.http.Req) !void {
-    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
-    if (try self.readBody(&body_buffer, req)) |body| {
-        var r = CommandRunner{
-            .controller = self.controller,
-            .stack = .{},
-        };
-        defer r.deinit();
-
-        self.controller.setHeartbeat(false);
-        defer self.controller.setHeartbeat(true);
-        r.runByteCode(body) catch |e| {
-            self.logError("run-bytecode-failed", e);
-            return error.RunBytecodeFailed;
-        };
-
-        self.sendStructAsJson(req, null, "complete test!");
-    }
-    return error.RequestBodyIsNotValid;
-}
-
-/// get /api/command/queue
-export fn getCommandQueueStatus(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
-    const self: *Self = @ptrCast(@alignCast(req.?.*.user_ctx.?));
-    self.logMemory();
-    defer self.logMemory();
-
-    const total = self.queue_capacity;
-    const space = self.queue.spacesAvailable();
-
-    var buf: [128]u8 = undefined;
-    const template =
-        \\{{"total":{d},"available":{d}}}
-    ;
-    const msg = std.fmt.bufPrint(&buf, template, .{ total, space }) catch |e| {
-        self.sendError(req, "parsed-wifi-config-failed", e);
-        return sys.ESP_FAIL;
+    self.dispatchAction(req, GETS) catch |err| {
+        self.sendJsonError(req, 500, @errorName(err));
     };
-    self.sendStructAsJson(req, msg, null);
 
     return sys.ESP_OK;
-}
-
-/// POST /api/command/queue
-fn postCommandEnqueue(self: *Self, req: [*c]mod.http.Req) !void {
-    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
-    if (try self.readBody(&body_buffer, req)) |body| {
-        if (QUEUE_CAPACITY - self.queue.spacesAvailable() >= self.queue_capacity) {
-            self.sendJsonError(req, 500, "full");
-            return error.Full;
-        }
-
-        var buf = self.allocator.alloc(u8, body.len) catch {
-            self.sendJsonError(req, 500, "alloc-bytecode-size-buffer-failed");
-            return error.AllocFail;
-        };
-        errdefer self.allocator.free(buf);
-        @memcpy(buf[0..], body);
-
-        self.queue.enqueue(.{ .allocator = self.allocator, .bytes = buf }) catch |err|
-            switch (err) {
-                Queue.QueueError.Full => {
-                    self.sendJsonError(req, 500, "full");
-                    return error.Full;
-                },
-                else => {
-                    self.sendJsonError(req, 500, "enqueue-error");
-                    return error.EnqueueError;
-                },
-            };
-
-        var msg_buf = body_buffer;
-        const template =
-            \\{{"total":{d},"available":{d}}}
-        ;
-        const msg = std.fmt.bufPrint(&msg_buf, template, .{
-            self.queue_capacity,
-            self.queue.spacesAvailable(),
-        }) catch |e| {
-            self.logError("msg buf too small", e);
-            return error.MsgBufTooSmall;
-        };
-        self.sendStructAsJson(req, msg, "enqueued!");
-    }
-    return error.RequestBodyIsNotValid;
 }
 
 fn logError(
@@ -522,4 +346,226 @@ export fn consumeByteCode(ctx: ?*anyopaque) callconv(.c) void {
             };
         }
     }
+}
+
+// =======================================
+//             API ACTIONS
+// =======================================
+
+// ---------------------------------------
+//                POST
+// ---------------------------------------
+
+const POSTS = .{
+    .{ "/cmd/queue", &postCommandEnqueue },
+    .{ "/cmd/run", &postCommandRunSync },
+    .{ "/cmd/run/raw", &postCommandRunSyncRaw },
+    .{ "/cmd/test", &postCommandTest },
+    .{ "/cfg/wifi", &postWifiConfig },
+};
+
+/// POST /cfg/wifi
+fn postWifiConfig(self: *Self, req: [*c]mod.http.Req) !void {
+    self.logMemory();
+    defer self.logMemory();
+
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (try self.readBody(&body_buffer, req)) |body| {
+        var parsed = std.json.parseFromSlice(
+            mod.Configuration.WifiConfig,
+            self.allocator,
+            body,
+            .{ .ignore_unknown_fields = true },
+        ) catch |e| {
+            self.logError("parsed-body-failed", e);
+            return error.ParseWifiConfigFailed;
+        };
+        defer parsed.deinit();
+
+        mod.config.storeStruct(@tagName(mod.Configuration.Keys.wf), parsed.value) catch |e| {
+            self.logError("store-wifi-config-failed", e);
+            return error.StoreWifiConfigFailed;
+        };
+        self.sendStructAsJson(req, null, "configurate wifi success");
+    }
+    return error.RequestBodyIsNotValid;
+}
+
+/// POST /cmd/test
+fn postCommandTest(self: *Self, req: [*c]mod.http.Req) !void {
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (try self.readBody(&body_buffer, req)) |body| {
+        mod.controller.command.runner.byteCodeTest(self.allocator, body) catch |e| {
+            self.logError("test-failed", e);
+            return error.TestFailed;
+        };
+        self.sendStructAsJson(req, null, "complete test!");
+    }
+    return error.RequestBodyIsNotValid;
+}
+
+/// POST /cmd/run/raw
+fn postCommandRunSyncRaw(self: *Self, req: [*c]mod.http.Req) !void {
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (try self.readBody(&body_buffer, req)) |body| {
+        var opt = mod.controller.command.parser.parseCommand(self.allocator, body) catch |e| {
+            self.logError("parse-script-failed", e);
+            return error.ParseMacroFailed;
+        };
+
+        if (opt) |*pack| {
+            defer pack.deinit();
+
+            var r = CommandRunner{
+                .controller = self.controller,
+                .stack = .{},
+            };
+            defer r.deinit();
+
+            self.controller.setHeartbeat(false);
+            defer self.controller.setHeartbeat(true);
+            r.runCommandPack(pack);
+        }
+        self.sendStructAsJson(req, null, "complete!");
+    }
+    return error.RequestBodyIsNotValid;
+}
+
+/// POST /cmd/run
+fn postCommandRunSync(self: *Self, req: [*c]mod.http.Req) !void {
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (try self.readBody(&body_buffer, req)) |body| {
+        var r = CommandRunner{
+            .controller = self.controller,
+            .stack = .{},
+        };
+        defer r.deinit();
+
+        self.controller.setHeartbeat(false);
+        defer self.controller.setHeartbeat(true);
+        r.runByteCode(body) catch |e| {
+            self.logError("run-bytecode-failed", e);
+            return error.RunBytecodeFailed;
+        };
+
+        self.sendStructAsJson(req, null, "complete test!");
+    }
+    return error.RequestBodyIsNotValid;
+}
+
+/// POST /cmd/queue
+fn postCommandEnqueue(self: *Self, req: [*c]mod.http.Req) !void {
+    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    if (try self.readBody(&body_buffer, req)) |body| {
+        if (QUEUE_CAPACITY - self.queue.spacesAvailable() >= self.queue_capacity) {
+            self.sendJsonError(req, 500, "full");
+            return error.Full;
+        }
+
+        var buf = self.allocator.alloc(u8, body.len) catch {
+            self.sendJsonError(req, 500, "alloc-bytecode-size-buffer-failed");
+            return error.AllocFail;
+        };
+        errdefer self.allocator.free(buf);
+        @memcpy(buf[0..], body);
+
+        self.queue.enqueue(.{ .allocator = self.allocator, .bytes = buf }) catch |err|
+            switch (err) {
+                Queue.QueueError.Full => {
+                    self.sendJsonError(req, 500, "full");
+                    return error.Full;
+                },
+                else => {
+                    self.sendJsonError(req, 500, "enqueue-error");
+                    return error.EnqueueError;
+                },
+            };
+
+        var msg_buf = body_buffer;
+        const template =
+            \\{{"total":{d},"available":{d}}}
+        ;
+        const msg = std.fmt.bufPrint(&msg_buf, template, .{
+            self.queue_capacity,
+            self.queue.spacesAvailable(),
+        }) catch |e| {
+            self.logError("msg buf too small", e);
+            return error.MsgBufTooSmall;
+        };
+        self.sendStructAsJson(req, msg, "enqueued!");
+    }
+    return error.RequestBodyIsNotValid;
+}
+
+// ---------------------------------------
+//                GET
+// ---------------------------------------
+
+const GETS = .{
+    .{ "/cfg/wifi", &getWifiConfig },
+    .{ "/ip", &getIp },
+    .{ "/cmd/queue", &getCommandQueueStatus },
+};
+
+/// GET /cfg/wifi
+fn getWifiConfig(self: *Self, req: [*c]mod.http.Req) !void {
+    var loaded = mod.config.loadStruct(
+        self.allocator,
+        @tagName(mod.Configuration.Keys.wf),
+        mod.Configuration.WifiConfig,
+    ) catch
+        mod.config.DefaultConfig(mod.Configuration.WifiConfig{});
+    defer loaded.deinit();
+
+    const template =
+        \\{{"ap":{{"ssid": "{s}", "pwd":"{s}"}},"sta":{{"ssid": "{s}", "pwd":"{s}"}}}}
+    ;
+
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, template, .{
+        loaded.config.ap.ssid,
+        loaded.config.ap.pwd,
+        loaded.config.sta.ssid,
+        loaded.config.sta.pwd,
+    }) catch {
+        return error.MsgBufTooSmall;
+    };
+    self.sendStructAsJson(req, msg, null);
+}
+
+/// GET /ip
+fn getIp(self: *Self, req: [*c]mod.http.Req) !void {
+    if (self.wifi.ip) |ip| {
+        var buf: [16]u8 = undefined;
+        const msg = std.fmt.bufPrint(
+            &buf,
+            "{}.{}.{}.{}",
+            .{
+                @as(u8, @truncate(ip)),
+                @as(u8, @truncate(ip >> 8)),
+                @as(u8, @truncate(ip >> 16)),
+                @as(u8, @truncate(ip >> 24)),
+            },
+        ) catch {
+            return error.MsgBufTooSmall;
+        };
+        self.sendStringAsJson(req, msg, null);
+    } else {
+        self.sendStructAsJson(req, null, "No IP.");
+    }
+}
+
+/// get /cmd/queue
+fn getCommandQueueStatus(self: *Self, req: [*c]mod.http.Req) !void {
+    const total = self.queue_capacity;
+    const space = self.queue.spacesAvailable();
+
+    var buf: [128]u8 = undefined;
+    const template =
+        \\{{"total":{d},"available":{d}}}
+    ;
+    const msg = std.fmt.bufPrint(&buf, template, .{ total, space }) catch {
+        return error.MsgBufTooSmall;
+    };
+    self.sendStructAsJson(req, msg, null);
 }

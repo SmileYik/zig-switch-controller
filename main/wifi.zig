@@ -45,6 +45,9 @@ pub const WifiManager = struct {
         },
     },
 
+    ip: ?u32 = null,
+    retry: u8 = 5,
+
     pub fn init(
         allocator: std.mem.Allocator,
         ap_auth: *const Auth,
@@ -197,15 +200,18 @@ pub const WifiManager = struct {
 
     export fn onWifiEvent(ctx: ?*anyopaque, _: sys.esp_event_base_t, event_id: i32, event_data: ?*anyopaque) callconv(.c) void {
         const self: *Self = @ptrCast(@alignCast(ctx.?));
-        _ = self;
 
         switch (event_id) {
             sys.WIFI_EVENT_STA_START => {
                 log.debug("STA started, initiating connection...", .{});
                 idf.wifi.connect() catch |err| log.err("connect() failed: {s}", .{@errorName(err)});
+                self.retry = 5;
             },
             sys.WIFI_EVENT_STA_DISCONNECTED => {
-                idf.wifi.connect() catch |err| log.err("connect() failed: {s}", .{@errorName(err)});
+                if (self.retry > 0) {
+                    self.retry -= 1;
+                    idf.wifi.connect() catch |err| log.err("connect() failed: {s}", .{@errorName(err)});
+                }
             },
             sys.WIFI_EVENT_AP_STACONNECTED => {
                 if (event_data) |data| {
@@ -233,6 +239,7 @@ pub const WifiManager = struct {
         if (event_id == sys.IP_EVENT_STA_GOT_IP) {
             const ev = @as(*sys.ip_event_got_ip_t, @ptrCast(@alignCast(event_data)));
             const ip = ev.ip_info.ip.addr;
+            self.ip = ip;
             log.debug("STA Got IP: {}.{}.{}.{}", .{
                 @as(u8, @truncate(ip)),
                 @as(u8, @truncate(ip >> 8)),

@@ -116,9 +116,11 @@ idf.py -p <PORT> flash
 设备启动 HTTP Server 后，可以通过 HTTP API 控制 Controller。
 
 | Method | Endpoint | Description |
-|---|---|---|
+| --- | --- | --- |
 | `GET` | `/` | API / Web 根入口 |
-| `GET` | `/api/config/wifi` | 获取 Wi-Fi 配置 |
+| `GET` | `/api?mode=/ip` | 获取连接到的 WI-FI 的 IP 地址 |
+| `GET` | `/api?mode=/cfg/wifi` | 获取 Wi-Fi 配置 |
+| `GET` | `/api?mode=/cmd/queue` | 获取字节码队列容量 |
 | `POST` | `/api?mode=/cfg/wifi` | 更新 Wi-Fi 配置 |
 | `POST` | `/api?mode=/cmd/queue` | 将控制器指令字节码推送到执行队列 |
 | `POST` | `/api?mode=/cmd/run` | 直接执行指令脚本字节码 |
@@ -228,7 +230,7 @@ WAIT 100
 
 ## 致谢
 
-这个项目存在离不开这些仓库的所有贡献者的奉献: 
+这个项目存在离不开这些仓库的所有贡献者的奉献:
 
 - [zig-espressif-bootstrap]
 - [zig-esp-idf-sample]

@@ -118,7 +118,7 @@ pub fn pressButton(self: *Controller, button: mod.Button, state: mod.ButtonState
         .upper => |mask| self.button_upper = setButtonBit(self.button_upper, @intFromEnum(mask), state),
     }
 
-    log.info(
+    log.debug(
         "set button [{}] to [{}]. combine = [{}], [lower, shared, upper] = [{x}, {x}, {x}]",
         .{
             button,
@@ -144,7 +144,7 @@ pub fn setStick(self: *Controller, stick: mod.StickType, x: i8, y: i8) void {
 }
 
 pub fn setStickUnlocked(self: *Controller, stick: mod.StickType, x: i8, y: i8) void {
-    log.info(
+    log.debug(
         "set stick [{}] (x, y) = ({d}, {d})",
         .{ stick, x, y },
     );

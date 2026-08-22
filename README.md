@@ -14,7 +14,6 @@
     - [环境准备](#环境准备)
     - [编译](#编译)
     - [烧录](#烧录)
-  - [配置信息](#配置信息)
   - [🌐 HTTP API](#-http-api)
   - [📡 Bluetooth HID](#-bluetooth-hid)
   - [命令脚本](#命令脚本)
@@ -112,23 +111,6 @@ idf.py build
 idf.py -p <PORT> flash
 ```
 
-## 配置信息
-
-这里还没有整理出来, 可能需要自己先摸索看看开哪些开关.
-
-```shell
-idf.py menuconfig
-```
-
-在菜单中需要开启以下功能(不一定准确):
-
-- Classic Bluetooth
-- Hidd-host
-- Wifi
-- Main Stack Size: 10240
-- HID Stack Size: 8192
-- RTOS Event Task Stack Size: 8192 
-
 ## 🌐 HTTP API
 
 设备启动 HTTP Server 后，可以通过 HTTP API 控制 Controller。
@@ -137,11 +119,11 @@ idf.py menuconfig
 |---|---|---|
 | `GET` | `/` | API / Web 根入口 |
 | `GET` | `/api/config/wifi` | 获取 Wi-Fi 配置 |
-| `POST` | `/api/config/wifi` | 更新 Wi-Fi 配置 |
-| `POST` | `/api/command/compile/base64` | 命令脚本 → Base64(URL_SAFE) 编码字节码 |
-| `POST` | `/api/command/compile/hex` | 命令脚本 → 十六进制编码字节码 |
-| `POST` | `/api/command/test/base64` | 测试 Base64(URL_SAFE) 编码字节码 |
-| `POST` | `/api/command/run/sync/raw` | 同步执行命令脚本 |
+| `POST` | `/api?mode=/cfg/wifi` | 更新 Wi-Fi 配置 |
+| `POST` | `/api?mode=/cmd/queue` | 将控制器指令字节码推送到执行队列 |
+| `POST` | `/api?mode=/cmd/run` | 直接执行指令脚本字节码 |
+| `POST` | `/api?mode=/cmd/run/raw` | 直接执行指令脚本 |
+| `POST` | `/api?mode=/cmd/test` | 测试指令字节码 |
 
 ## 📡 Bluetooth HID
 
@@ -252,6 +234,7 @@ WAIT 100
 - [zig-esp-idf-sample]
 - [nxbt]
 - [nuxbt]
+- [Nintendo_Switch_Reverse_Engineering]
 
 ## 声明
 
@@ -262,3 +245,4 @@ WAIT 100
 [zig-esp-idf-sample]: https://github.com/kassane/zig-esp-idf-sample
 [nxbt]: https://github.com/Brikwerk/nxbt
 [nuxbt]: https://github.com/hannahbee91/nuxbt
+[Nintendo_Switch_Reverse_Engineering]: https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering

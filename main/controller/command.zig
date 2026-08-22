@@ -33,7 +33,7 @@ pub const CommandTag = enum(u8) {
     up_combine = 0x05,
     /// DOWN button
     down_combine = 0x06,
-    /// TAP button time_num{unit}
+    /// TAP time_num1{unit} time_num2{unit} BUTTONS
     tap_combine = 0x07,
 
     /// RESET_STICK stick_type

@@ -229,7 +229,12 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             }
         },
         .tap, .tap_combine => {
-            const duration = if (iter.next()) |time_str|
+            const down_duration = if (iter.next()) |time_str|
+                try parseTimeString(time_str)
+            else
+                return error.MissingArgument;
+
+            const up_duration = if (iter.next()) |time_str|
                 try parseTimeString(time_str)
             else
                 return error.MissingArgument;
@@ -237,10 +242,12 @@ pub fn parseCommandLine(allocator: std.mem.Allocator, script_line: []const u8) !
             var buttons = try parseCommandButtons(allocator, &iter);
             defer buttons.deinit(allocator);
 
-            var items = try commands.addManyAsSlice(allocator, buttons.items.len * 2 + 1);
+            var items = try commands.addManyAsSlice(allocator, buttons.items.len * 2 + 2);
             var downs = items[0..buttons.items.len];
-            items[buttons.items.len] = .{ .wait = duration };
-            var ups = items[buttons.items.len + 1 ..];
+            items[buttons.items.len] = .{ .wait = down_duration };
+
+            var ups = items[buttons.items.len + 1 ..][0..buttons.items.len];
+            items[items.len - 1] = .{ .wait = up_duration };
 
             const active_combine = tag == CommandTag.tap_combine;
             for (buttons.items, 0..) |btn, i| {

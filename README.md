@@ -176,7 +176,7 @@ UP A
 等价于
 
 ```text
-TAP 100ms A
+TAP 100ms 0ms A
 ```
 
 ### 组合按键输入
@@ -187,12 +187,13 @@ TAP 100ms A
 DOWN L R
 WAIT 100ms
 UP L R
+WAIT 50ms
 ```
 
 等价于
 
 ```text
-TAP 100ms L R
+TAP 100ms 50ms L R
 ```
 
 ### 摇杆输入

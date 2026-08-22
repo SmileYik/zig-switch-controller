@@ -20,10 +20,11 @@ pub fn start(self: *http) !void {
     errdefer self.running.store(false, .release);
 
     var config = sys.zig_httpd_default_config();
-    config.stack_size = 10240;
+    config.stack_size = 12280;
     config.recv_wait_timeout = 90;
     config.max_uri_handlers = 16;
-    config.max_open_sockets = 1;
+    config.max_open_sockets = 2;
+    config.max_uri_len = 64;
 
     self.server = try idf.http.Server.start(&config);
 }

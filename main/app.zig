@@ -110,16 +110,20 @@ export fn app_main() callconv(.c) void {
     };
     defer controller.deinit();
 
-    var http_action = mod.http_action.init(allocator, controller) catch |err| {
+    var http_action = mod.http_action.init(
+        allocator,
+        controller,
+        &heap,
+    ) catch |err| {
         log.err("Http action 初始化失败: {s}", .{@errorName(err)});
         return;
     };
     http_srv.registerUris(http_action.getUris()) catch |err| {
         log.err("Http action 注册失败: {s}", .{@errorName(err)});
     };
-    // http_action.startConsume() catch |err| {
-    //     log.err("Http action 队伍列表启动失败: {s}", .{@errorName(err)});
-    // };
+    http_action.startConsume() catch |err| {
+        log.err("Http action 队伍列表启动失败: {s}", .{@errorName(err)});
+    };
 
     log.info("========== ESP32 Switch HID 手柄已启动 ==========", .{});
 

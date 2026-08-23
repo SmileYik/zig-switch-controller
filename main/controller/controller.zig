@@ -191,6 +191,17 @@ pub fn setHeartbeat(self: *Controller, flag: bool) void {
     self.heartbeat = flag;
 }
 
+pub fn heartbeatLoop(self: *Controller, comptime every_ms: u16) void {
+    while (true) {
+        if (self.heartbeat and !self.handler.send_report_flag) {
+            log.debug("send heartbeat", .{});
+            self.handler.send(.{ .incoming = null }) catch {};
+        }
+        self.handler.resetSendFlag();
+        self.handler.sleep(every_ms);
+    }
+}
+
 /// set button bit. if state is press then set bit to `1`, else set bit to `0`.
 fn setButtonBit(byte: u8, mask: u8, state: mod.ButtonState) u8 {
     return switch (state) {

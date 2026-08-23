@@ -137,18 +137,7 @@ export fn app_main() callconv(.c) void {
     }
 
     // heartbeat loop
-    while (true) {
-        sendReportTask(controller);
-    }
-}
-
-export fn sendReportTask(ctx: ?*anyopaque) callconv(.c) void {
-    var controller: *mod.controller.Controller = @ptrCast(@alignCast(ctx.?));
-    while (true) {
-        if (controller.heartbeat)
-            controller.handler.send(.{ .incoming = null }) catch {};
-        idf.rtos.Task.delayMs(500);
-    }
+    controller.heartbeatLoop(500);
 }
 
 pub const panic = idf.esp_panic.panic;

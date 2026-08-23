@@ -7,6 +7,8 @@ ctx: *anyopaque,
 sendFn: *const fn (ctx: *anyopaque, report: ReportType) anyerror!void = undefined,
 sleepFn: *const fn (ctx: *anyopaque, ms: u32) void = undefined,
 
+send_report_flag: bool = false,
+
 pub fn init(handler: anytype) ControllerHandler {
     const Pointer = @TypeOf(handler);
     comptime {
@@ -45,7 +47,12 @@ pub fn init(handler: anytype) ControllerHandler {
     return interface;
 }
 
+pub fn resetSendFlag(self: *ControllerHandler) void {
+    self.send_report_flag = false;
+}
+
 pub fn send(self: *ControllerHandler, report: ReportType) !void {
+    self.send_report_flag = true;
     return self.sendFn(self.ctx, report);
 }
 

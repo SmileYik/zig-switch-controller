@@ -1,5 +1,6 @@
 const std = @import("std");
 const mod = @import("root.zig");
+const web = @import("web");
 const sys = mod.sys;
 const idf = mod.idf;
 
@@ -83,16 +84,14 @@ pub fn logMemory(self: *Self) void {
     log.info("--- memory: {d}/{d}", .{ self.heap.freeSize(), self.heap.totalSize() });
 }
 
-const index_html =
-    \\<!DOCTYPE html><html><body>
-    \\<h1>Hello from Zig on ESP32!</h1>
-    \\<p>This page is served by the Zig HTTP server wrapper.</p>
-    \\</body></html>
-;
-
 /// GET / — serve the index page.
 export fn handleRoot(req: [*c]mod.http.Req) callconv(.c) sys.esp_err_t {
-    idf.http.Server.Response.sendStr(req, index_html) catch |err| {
+    idf.http.Server.Response.setHDR(req, "Content-Encoding", "gzip") catch {};
+    idf.http.Server.Response.sendChunk(req, web.index_html_gz) catch |err| {
+        log.err("sendStr: {s}", .{@errorName(err)});
+        return sys.ESP_FAIL;
+    };
+    idf.http.Server.Response.sendChunk(req, &[_:0]u8{}) catch |err| {
         log.err("sendStr: {s}", .{@errorName(err)});
         return sys.ESP_FAIL;
     };

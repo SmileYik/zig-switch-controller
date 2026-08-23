@@ -11,6 +11,12 @@ pub fn build(b: *std.Build) !void {
         @intFromEnum(std.Target.xtensa.Feature.text_section_literals),
     );
 
+    const web_mod = b.createModule(.{
+        .root_source_file = b.path("web/web.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const esp_idf_mod = idf_wrapped_modules(b);
 
     const report_mod = b.createModule(.{
@@ -56,6 +62,7 @@ pub fn build(b: *std.Build) !void {
     mod.addImport("controller", controller_mod);
     mod.addImport("protocol", protocol_mod);
     mod.addImport("esp_idf", esp_idf_mod);
+    mod.addImport("web", web_mod);
 
     const obj = b.addObject(.{
         .name = "app_zig",

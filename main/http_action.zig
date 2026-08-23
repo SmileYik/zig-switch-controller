@@ -220,9 +220,6 @@ fn sendStructAsJson(
     self.sendStructAsJsonInner(req, 200, value, false, message) catch |e| {
         self.sendError(req, "send-json-error-failed", e);
     };
-
-    idf.http.Server.Response.setHDR(req, "Access-Control-Allow-Origin", "*") catch {};
-    idf.http.Server.Response.setHDR(req, "Access-Control-Allow-Headers", "*") catch {};
 }
 
 fn sendStructAsJsonInner(
@@ -233,7 +230,7 @@ fn sendStructAsJsonInner(
     has_quote: bool,
     message: ?[]const u8,
 ) !void {
-    var buf: [1024:0]u8 = undefined;
+    var buf: [512:0]u8 = undefined;
     const json = try std.fmt.bufPrintSentinel(
         &buf,
         "{{\"code\":{d},\"msg\":\"{s}\",\"data\":{s}{s}{s}}}",
@@ -377,7 +374,7 @@ fn postWifiConfig(self: *Self, req: [*c]mod.http.Req) !void {
     self.logMemory();
     defer self.logMemory();
 
-    var body_buffer: [MAX_BODY_SIZE]u8 = undefined;
+    var body_buffer: [256]u8 = undefined;
     if (try self.readBody(&body_buffer, req)) |body| {
         var parsed = std.json.parseFromSlice(
             mod.Configuration.WifiConfig,
@@ -582,7 +579,7 @@ fn getCommandQueueStatus(self: *Self, req: [*c]mod.http.Req) !void {
     const total = self.queue_capacity;
     const space = self.queue.spacesAvailable();
 
-    var buf: [128]u8 = undefined;
+    var buf: [48]u8 = undefined;
     const template =
         \\{{"total":{d},"available":{d}}}
     ;

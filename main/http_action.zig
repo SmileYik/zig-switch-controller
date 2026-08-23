@@ -338,12 +338,18 @@ export fn consumeByteCode(ctx: ?*anyopaque) callconv(.c) void {
             var bytecode = item.value;
             defer bytecode.deinit();
 
-            self.controller.setHeartbeat(false);
-            defer self.controller.setHeartbeat(true);
+            if (self.controller.heartbeat) {
+                self.controller.setHeartbeat(false);
+                defer self.controller.setHeartbeat(true);
 
-            r.runByteCodeUnsafe(bytecode.bytes) catch |e| {
-                log.err("exception when consuming bytecode: {s}", .{@errorName(e)});
-            };
+                r.runByteCodeUnsafe(bytecode.bytes) catch |e| {
+                    log.err("exception when consuming bytecode: {s}", .{@errorName(e)});
+                };
+            } else {
+                r.runByteCodeUnsafe(bytecode.bytes) catch |e| {
+                    log.err("exception when consuming bytecode: {s}", .{@errorName(e)});
+                };
+            }
         }
     }
 }
@@ -362,6 +368,8 @@ const POSTS = .{
     .{ "/cmd/run/raw", &postCommandRunSyncRaw },
     .{ "/cmd/test", &postCommandTest },
     .{ "/cfg/wifi", &postWifiConfig },
+    .{ "/cmd/hb/on", &postControllerHeartbeatOn },
+    .{ "/cmd/hb/off", &postControllerHeartbeatOff },
 };
 
 /// POST /cfg/wifi
@@ -497,6 +505,18 @@ fn postCommandEnqueue(self: *Self, req: [*c]mod.http.Req) !void {
     return error.RequestBodyIsNotValid;
 }
 
+/// POST /cmd/hb/on
+fn postControllerHeartbeatOn(self: *Self, req: [*c]mod.http.Req) !void {
+    self.controller.setHeartbeat(true);
+    self.sendStructAsJson(req, null, "heartbeat on");
+}
+
+/// POST /cmd/hb/off
+fn postControllerHeartbeatOff(self: *Self, req: [*c]mod.http.Req) !void {
+    self.controller.setHeartbeat(false);
+    self.sendStructAsJson(req, null, "heartbeat off");
+}
+
 // ---------------------------------------
 //                GET
 // ---------------------------------------
@@ -505,6 +525,8 @@ const GETS = .{
     .{ "/cfg/wifi", &getWifiConfig },
     .{ "/ip", &getIp },
     .{ "/cmd/queue", &getCommandQueueStatus },
+    .{ "/cmd/hb", &getControllerHeartbeat },
+    .{ "/memory", &getMemoryStatus },
 };
 
 /// GET /cfg/wifi
@@ -567,5 +589,34 @@ fn getCommandQueueStatus(self: *Self, req: [*c]mod.http.Req) !void {
     const msg = std.fmt.bufPrint(&buf, template, .{ total, space }) catch {
         return error.MsgBufTooSmall;
     };
+    self.sendStructAsJson(req, msg, null);
+}
+
+/// get /cmd/hb
+fn getControllerHeartbeat(self: *Self, req: [*c]mod.http.Req) !void {
+    self.sendStructAsJson(
+        req,
+        if (self.controller.heartbeat) "true" else "false",
+        null,
+    );
+}
+
+/// get /memory
+fn getMemoryStatus(self: *Self, req: [*c]mod.http.Req) !void {
+    var buf: [128]u8 = undefined;
+    const template =
+        \\{{"total":{d},"free":{d},"internalFree":{d},"largestFree":{d},"mininumFree":{d}}}
+    ;
+    const msg = std.fmt.bufPrint(
+        &buf,
+        template,
+        .{
+            self.heap.totalSize(),
+            self.heap.freeSize(),
+            self.heap.internalFreeSize(),
+            self.heap.largestFreeBlock(),
+            self.heap.minimumFreeSize(),
+        },
+    ) catch return error.MsgBufTooSmall;
     self.sendStructAsJson(req, msg, null);
 }

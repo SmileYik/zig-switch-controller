@@ -422,6 +422,8 @@ pub fn loadStruct(
     errdefer arena.deinit();
 
     const handle = try nvs.open(namespace, .read_only);
+    defer nvs.close(handle);
+
     const result = try loadStructInner(alloc, handle, namespace, T);
     return .{ .allocator = arena, .config = result };
 }
@@ -431,5 +433,6 @@ pub fn storeStruct(
     value: anytype,
 ) !void {
     const handle = try nvs.open(namespace, .read_write);
+    defer nvs.close(handle);
     return try storeStructInner(handle, namespace, value);
 }

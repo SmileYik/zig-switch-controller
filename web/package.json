@@ -1,0 +1,31 @@
+{
+  "name": "zig-switch-controller-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/html-minifier-terser": "^7.0.2",
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "html-minifier-terser": "^7.2.0",
+    "oxlint": "^1.75.0",
+    "terser": "^5.50.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vite-plugin-compression2": "^2.5.3",
+    "vite-plugin-html": "^3.2.2",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}

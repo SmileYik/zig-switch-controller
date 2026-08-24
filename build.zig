@@ -1,15 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    var target = b.standardTargetOptions(.{
+    const target = b.standardTargetOptions(.{
         .whitelist = espressif_targets,
         .default_target = espressif_targets[0],
     });
     const optimize = b.standardOptimizeOption(.{});
-
-    target.query.cpu_features_add.addFeature(
-        @intFromEnum(std.Target.xtensa.Feature.text_section_literals),
-    );
 
     const web_mod = b.createModule(.{
         .root_source_file = b.path("web/web.zig"),
@@ -70,6 +66,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("main/app.zig"),
             .target = target,
             .optimize = optimize,
+            .code_model = .large,
             .link_libc = true,
         }),
     });

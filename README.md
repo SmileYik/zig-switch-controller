@@ -14,7 +14,10 @@
     - [环境准备](#环境准备)
     - [编译](#编译)
     - [烧录](#烧录)
-  - [🌐 HTTP API](#-http-api)
+  - [Web](#web)
+    - [功能](#功能-1)
+    - [访问 Web 页面](#访问-web-页面)
+    - [HTTP API](#http-api)
   - [📡 Bluetooth HID](#-bluetooth-hid)
   - [命令脚本](#命令脚本)
     - [基础按键输入](#基础按键输入)
@@ -35,9 +38,10 @@
 - 🎮 **Nintendo Switch Pro Controller Emulator**
 - 📡 **Bluetooth Classic HID**
 - 🕹️ 按键、组合键、摇杆控制
-- 🌐 Wi-Fi APSTA
+- 🌐 Wi-Fi AP/STA
 - 🚀 HTTP REST API
 - 💾 ESP-IDF NVS 配置
+- 🖥️ 网页界面
 
 ## 架构
 
@@ -82,6 +86,8 @@
 
 ### 环境准备
 
+- NodeJs v24.19.0
+- npm
 - CMake
 - Ninja
 - ESP-IDF 6.0.2
@@ -111,7 +117,30 @@ idf.py build
 idf.py -p <PORT> flash
 ```
 
-## 🌐 HTTP API
+## Web
+
+内嵌一个简单的控制面板页面, 用于向 ESP32 发送指令和修改配置.
+
+![控制面板](./docs/web.png)
+
+### 功能
+
+- 查看当前所连 WIFI IP 地址.
+- 控制手柄心跳数据包
+- 查看 ESP32 的内存状态
+- 查看 ESP32 的任务队列
+- 修改 WiFi/AP 的名称和密码
+- 直接运行命令脚本
+- 编译命令脚本为字节码后执行
+- 将命令脚本分组后依次编译并加入工作队列
+
+### 访问 Web 页面
+
+本固件默认会开放一个 WIFI 热点, 在连入这个 WIFI 热点后可以访问 [http://192.168.4.1](http://192.168.4.1) 进入 Web 页面.
+
+若 ESP32 连接到了 WIFI, 则可以先通过上一步获取道 ESP32 的 IP 地址后, 再由这个 IP 地址进行访问.
+
+### HTTP API
 
 设备启动 HTTP Server 后，可以通过 HTTP API 控制 Controller。
 
@@ -119,6 +148,7 @@ idf.py -p <PORT> flash
 | --- | --- | --- |
 | `GET` | `/` | API / Web 根入口 |
 | `GET` | `/api?mode=/ip` | 获取连接到的 WI-FI 的 IP 地址 |
+| `GET` | `/api?mode=/memory` | 获取 ESP32 的堆内存信息 |
 | `GET` | `/api?mode=/cfg/wifi` | 获取 Wi-Fi 配置 |
 | `GET` | `/api?mode=/cmd/queue` | 获取字节码队列容量 |
 | `POST` | `/api?mode=/cfg/wifi` | 更新 Wi-Fi 配置 |

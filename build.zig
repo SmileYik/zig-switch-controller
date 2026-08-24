@@ -7,6 +7,14 @@ pub fn build(b: *std.Build) !void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
+    const web_install = b.addSystemCommand(&.{ "npm", "install", "--force" });
+    web_install.setCwd(b.path("web"));
+    const web_build = b.addSystemCommand(&.{ "npm", "run", "build" });
+    web_build.setCwd(b.path("web"));
+    var web_target = b.step("web", "Build the web frontend.");
+    web_target.dependOn(&web_install.step);
+    web_target.dependOn(&web_build.step);
+
     const web_mod = b.createModule(.{
         .root_source_file = b.path("web/web.zig"),
         .target = target,
@@ -71,6 +79,7 @@ pub fn build(b: *std.Build) !void {
         }),
     });
     obj.root_module.addImport("mod", mod);
+    obj.step.dependOn(web_target);
 
     const obj_install = b.addInstallArtifact(obj, .{
         .dest_dir = .{

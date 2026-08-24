@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { esp32Api, ApiError } from './api';
 import type { MemoryStatus, QueueStatus, WifiConfig } from './api';
 import './Dashboard.css';
+import { compile } from './macroCompiler';
+import { runScriptMacroInGroups } from './runner';
 
 // ==========================================
 // Inline Icons
@@ -80,8 +82,9 @@ const IpCard: React.FC<IpCardProps> = ({ ip }) => (
 interface HeartbeatCardProps {
   heartbeat: boolean;
   onToggle: () => void;
+  executingCmd: boolean;
 }
-const HeartbeatCard: React.FC<HeartbeatCardProps> = ({ heartbeat, onToggle }) => (
+const HeartbeatCard: React.FC<HeartbeatCardProps> = ({ heartbeat, onToggle, executingCmd }) => (
   <div className="card-surface">
     <div className="card-header-row">
       <Icons.Heartbeat />
@@ -93,9 +96,10 @@ const HeartbeatCard: React.FC<HeartbeatCardProps> = ({ heartbeat, onToggle }) =>
     <div className="card-label">心跳机制 (Heartbeat)</div>
     <button
       onClick={onToggle}
-      className={`heartbeat-button ${heartbeat ? 'heartbeat-button--active' : 'heartbeat-button--inactive'}`}
+      disabled={executingCmd}
+      className={`heartbeat-button ${(heartbeat || executingCmd) ? 'heartbeat-button--active' : 'heartbeat-button--inactive'}`}
     >
-      {heartbeat ? '关闭心跳' : '开启心跳'}
+      {heartbeat ? '关闭心跳' : (executingCmd ? '正在运行中, 无法开启心跳' : '开启心跳')}
     </button>
   </div>
 );
@@ -213,38 +217,86 @@ interface CommandRunnerCardProps {
   onChangeScript: (value: string) => void;
   onRun: () => void;
   executing: boolean;
+  onRunBytecode: () => void;
+  onEnqueue: (chunkSize: number) => void;
+  onStopEnqueue: () => void;
+  currentGroupIdx: number,
+  totalGroups: number,
 }
 const CommandRunnerCard: React.FC<CommandRunnerCardProps> = ({
   rawScript,
   onChangeScript,
   onRun,
+  onRunBytecode,
+  onEnqueue,
+  onStopEnqueue,
+  currentGroupIdx,
+  totalGroups,
   executing,
-}) => (
-  <div className="command-section">
-    <div className="section-header">
-      <Icons.Code />
-      <h2 className="section-title">快速运行宏脚本</h2>
-    </div>
+}) => {
 
-    <textarea
-      rows={4}
-      value={rawScript}
-      onChange={(e) => onChangeScript(e.target.value)}
-      placeholder="在此输入需要同步解析运行的指令脚本..."
-      className="script-textarea"
-    />
+  type ButtonType = 'raw' | 'bytecode' | 'enqueue';
+  const [clickedButtonType, setClickedButtonType] = useState<ButtonType>("raw");
 
-    <div className="action-row-right">
-      <button
-        onClick={onRun}
-        disabled={executing || !rawScript.trim()}
-        className="primary-action-btn"
-      >
-        {executing ? '执行中...' : '发送并同步运行'}
-      </button>
+  return (
+    <div className="command-section">
+      <div className="section-header">
+        <Icons.Code />
+        <h2 className="section-title">快速运行宏脚本</h2>
+      </div>
+
+      <textarea
+        rows={4}
+        value={rawScript}
+        onChange={(e) => onChangeScript(e.target.value)}
+        placeholder="在此输入需要同步解析运行的指令脚本..."
+        className="script-textarea"
+      />
+
+      <div className="action-row-right">
+        {(!executing || clickedButtonType === 'bytecode') &&
+          <button
+            onClick={() => {onRunBytecode(); setClickedButtonType('bytecode')}}
+            disabled={executing || !rawScript.trim()}
+            title='将脚本编译成字节码后立即同步运行'
+            className="primary-action-btn"
+          >
+            {executing ? `执行中...` : '编译并运行'}
+          </button>
+        }
+
+        {(!executing || clickedButtonType === 'raw') &&
+          <button
+            onClick={() => {onRun(); setClickedButtonType('raw');}}
+            disabled={executing || !rawScript.trim()}
+            title='直接同步运行所输入的脚本'
+            className="primary-action-btn"
+          >
+            {executing ? '执行中...' : '发送并同步运行'}
+          </button>
+        }
+
+        {(!executing || clickedButtonType === 'enqueue') &&
+          <button
+            onClick={() => {
+              if (executing) {
+                onStopEnqueue();
+              } else {
+                onEnqueue(200); 
+                setClickedButtonType('enqueue');
+              }
+            }}
+            disabled={!rawScript.trim()}
+            title='将脚本分批编译并入队等待运行'
+            className="primary-action-btn"
+          >
+            {executing ? `执行中(${currentGroupIdx + 1}/${totalGroups})... 取消执行...` : '分批入队运行'}
+          </button>
+        }
+      </div>
     </div>
-  </div>
-);
+  );
+}
 
 /** Wi-Fi 编辑弹窗 */
 interface WifiEditModalProps {
@@ -330,7 +382,7 @@ export const Dashboard: React.FC = () => {
   const [heartbeat, setHeartbeat] = useState<boolean>(false);
   const [wifiConfig, setWifiConfig] = useState<WifiConfig | null>(null);
 
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -343,6 +395,9 @@ export const Dashboard: React.FC = () => {
 
   // Command Runner State
   const [rawScript, setRawScript] = useState<string>('');
+  const [groupIdx, setGroupIdx] = useState<number>(0);
+  const [totalGroups, setTotalGroups] = useState<number>(0);
+  const stopExecuting = useRef<boolean>(false);
   const [executingCmd, setExecutingCmd] = useState<boolean>(false);
 
   // ------------------------------------------
@@ -350,29 +405,41 @@ export const Dashboard: React.FC = () => {
   // ------------------------------------------
   const fetchAllStatus = useCallback(async () => {
     setLoading(true);
-    try {
-      const [ipRes, memRes, queueRes, hbRes, wifiRes] = await Promise.all([
-        esp32Api.getIp(),
-        esp32Api.getMemoryStatus(),
-        esp32Api.getQueueStatus(),
-        esp32Api.getHeartbeat(),
-        esp32Api.getWifiConfig(),
-      ]);
-
-      setIp(ipRes || '未分配 IP');
-      setMemory(memRes);
-      setQueue(queueRes);
-      setHeartbeat(hbRes);
-      setWifiConfig(wifiRes);
-      setStatusMessage(null);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        setStatusMessage({ text: `设备异常 [${err.code}]: ${err.message}`, isError: true });
-      } else if (err instanceof Error) {
-        setStatusMessage({ text: `网络通信失败: ${err.message}`, isError: true });
+    const f = async (callback: ()=>void) => {
+      try {
+        await callback()
+      } catch (err: unknown) {
+        if (err instanceof ApiError) {
+          setStatusMessage({ text: `设备异常 [${err.code}]: ${err.message}`, isError: true });
+        } else if (err instanceof Error) {
+          setStatusMessage({ text: `网络通信失败: ${err.message}`, isError: true });
+        }
       }
+    };
+    try {
+      await f(async () => {
+        const data = await esp32Api.getIp();
+        setIp(data || '未分配 IP');
+      });
+      await f(async () => {
+        const data = await esp32Api.getMemoryStatus();
+        setMemory(data);
+      });
+      await f(async () => {
+        const data = await esp32Api.getQueueStatus();
+        setQueue(data);
+      });
+      await f(async () => {
+        const data = await esp32Api.getHeartbeat();
+        setHeartbeat(data);
+      });
+      await f(async () => {
+        const data = await esp32Api.getWifiConfig();
+        setWifiConfig(data);
+      });
     } finally {
       setLoading(false);
+      setStatusMessage(null);
     }
   }, []);
 
@@ -441,6 +508,69 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const handleRunBytecode = async () => {
+    if (!rawScript.trim()) return;
+    setExecutingCmd(true);
+    try {
+      const bytecode = compile(rawScript);
+      if (bytecode) {
+        await esp32Api.runCommandSync(bytecode)
+      }
+      fetchAllStatus();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '执行失败';
+      setStatusMessage({ text: `指令执行失败: ${msg}`, isError: true });
+    } finally {
+      setExecutingCmd(false);
+    }
+  }
+
+  const handleStopEnqueue = async () => {
+    stopExecuting.current = true;
+  };
+
+  const handleEnqueueBytecode = async (chunkSize: number = 200) => {
+    if (!rawScript.trim()) return;
+    setExecutingCmd(true);
+    stopExecuting.current = false;
+
+    try {
+      const script = rawScript.trim();
+      await runScriptMacroInGroups(script, {
+        start: groupIdx,
+        callback: async (groupSize, idx, bytecode, opts) => {
+          setGroupIdx(idx);
+          setTotalGroups(groupSize);
+          while (true) {
+          if (stopExecuting.current) return true;
+
+            try {
+              await esp32Api.enqueueCommand(bytecode);
+              setStatusMessage({ text: `第 ${idx + 1} 组字节码已入队`, isError: true });
+              break;
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : '执行失败';
+              setStatusMessage({ text: `字节码入队失败: ${msg}, ${opts.retryWaitTime}ms 后重试`, isError: true });
+              if (opts.sleep)
+                await opts.sleep(opts.retryWaitTime || 30000);
+            }
+          }
+          return false;
+        },
+        chunkSize: chunkSize,
+        finshCallback: () => {
+          setStatusMessage({ text: `指令执行完成`, isError: false });
+        }
+      })
+      fetchAllStatus();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '执行失败';
+      setStatusMessage({ text: `指令执行失败: ${msg}`, isError: true });
+    } finally {
+      setExecutingCmd(false);
+    }
+  }
+
   // Helper calculations
   const memoryUsagePct = memory
     ? Math.round(((memory.total - memory.free) / memory.total) * 100)
@@ -490,7 +620,7 @@ export const Dashboard: React.FC = () => {
         {/* Top Summary Cards Grid */}
         <div className="top-summary-grid">
           <IpCard ip={ip} />
-          <HeartbeatCard heartbeat={heartbeat} onToggle={handleToggleHeartbeat} />
+          <HeartbeatCard heartbeat={heartbeat} onToggle={handleToggleHeartbeat} executingCmd={executingCmd} />
           <QueueCard queue={queue} usagePct={queueUsagePct} />
         </div>
 
@@ -505,6 +635,11 @@ export const Dashboard: React.FC = () => {
           rawScript={rawScript}
           onChangeScript={setRawScript}
           onRun={handleRunRawScript}
+          onEnqueue={handleEnqueueBytecode}
+          onStopEnqueue={handleStopEnqueue}
+          onRunBytecode={handleRunBytecode}
+          totalGroups={totalGroups}
+          currentGroupIdx={groupIdx}
           executing={executingCmd}
         />
       </div>

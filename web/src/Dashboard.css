@@ -139,6 +139,10 @@ body {
 
 /* Toast Message */
 .toast {
+  position: fixed;
+  top: 30px;
+  max-width: 250px;
+  right: 50px;
   padding: 12px 20px;
   border-radius: var(--md-sys-shape-corner-medium);
   font-size: 14px;

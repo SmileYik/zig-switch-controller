@@ -7,9 +7,12 @@ pub fn build(b: *std.Build) !void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
-    const web_install = b.addSystemCommand(&.{ "npm", "install", "--force" });
+    const web_build_cmd_opt = b.option([]const u8, "web-build-cmd", "Special web build command");
+    const web_build_cmd = web_build_cmd_opt orelse "npm";
+
+    const web_install = b.addSystemCommand(&.{ web_build_cmd, "install", "--force" });
     web_install.setCwd(b.path("web"));
-    const web_build = b.addSystemCommand(&.{ "npm", "run", "build" });
+    const web_build = b.addSystemCommand(&.{ web_build_cmd, "run", "build" });
     web_build.setCwd(b.path("web"));
     var web_target = b.step("web", "Build the web frontend.");
     web_target.dependOn(&web_install.step);

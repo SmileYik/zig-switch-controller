@@ -474,6 +474,7 @@ add_custom_target(zig_build
     ${ZIG_BIN} build
     --build-file ${CMAKE_SOURCE_DIR}/build.zig
     -Doptimize=${ZIG_BUILD_TYPE}
+    -Dweb-build-cmd=${WEB_BUILD_CMD}
     -Dtarget=${ZIG_TARGET}
     -Dcpu=${TARGET_CPU_MODEL}
     ${ZIG_EXAMPLE_ARG}

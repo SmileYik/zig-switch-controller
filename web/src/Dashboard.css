@@ -464,6 +464,7 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.2s ease;
+  margin: 0px 5px;
 }
 
 .primary-action-btn:hover:not(:disabled) {

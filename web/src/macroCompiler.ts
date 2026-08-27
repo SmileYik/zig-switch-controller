@@ -529,3 +529,133 @@ export function compileToBase64(script: string, padding = true): string | null {
   if (!bytecode) return null;
   return bytesToUrlSafeBase64(bytecode, padding);
 }
+
+/**
+ * 格式化毫秒数为友好时间字符串 (例如: 1小时23分45秒 / 500毫秒)
+ */
+export function formatDuration(totalMs: number): string {
+  if (totalMs <= 0) return '0秒';
+
+  const hours = Math.floor(totalMs / (1000 * 60 * 60));
+  const minutes = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((totalMs % (1000 * 60)) / 1000);
+  const ms = totalMs % 1000;
+
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours}小时`);
+  if (minutes > 0) parts.push(`${minutes}分`);
+  if (seconds > 0) parts.push(`${seconds}秒`);
+  if (ms > 0) parts.push(`${ms}毫秒`);
+
+  return parts.join('');
+}
+
+/**
+ * 解析编译后的字节码，计算所有 wait 指令的总等待时间
+ * @param bytecode 编译出的 Uint8Array 字节码
+ * @returns 包含总毫秒数和友好的时间格式化字符串
+ */
+export function calculateBytecodeWaitTime(bytecode: Uint8Array): { totalMs: number; formatted: string } {
+  if (!bytecode || bytecode.length < 2) {
+    return { totalMs: 0, formatted: '0秒' };
+  }
+
+  // 字节 0 指定大小端: 1 表示 Little-Endian, 0 表示 Big-Endian
+  const isLittleEndian = bytecode[0] === 1;
+  const view = new DataView(bytecode.buffer, bytecode.byteOffset, bytecode.byteLength);
+  let offset = 1;
+
+  function parseBlock(): number {
+    let blockMs = 0;
+
+    // 检查并跳过块起始标记 CommandTag.commands (0x81)
+    if (offset < bytecode.length && bytecode[offset] === CommandTag.commands) {
+      offset++;
+    }
+
+    while (offset < bytecode.length) {
+      const tag = bytecode[offset++];
+
+      // 遇 CommandTag.end (0x00) 则结束当前块解析
+      if (tag === CommandTag.end) {
+        break;
+      }
+
+      switch (tag) {
+        // 单字节参数指令 (按键/摇杆重置等)
+        case CommandTag.up: // up
+        case CommandTag.down: // down
+        case CommandTag.up_combine: // up_combine
+        case CommandTag.down_combine: // down_combine
+        case CommandTag.reset_stick: // reset_stick
+          offset += 1;
+          break;
+
+        // 3 字节参数指令
+        case CommandTag.stick: // stick (stickType: 1B, x: 1B, y: 1B)
+          offset += 3;
+          break;
+
+        // 无参数指令
+        case CommandTag.reset_button: // reset_button
+        case CommandTag.reset_all: // reset_all
+          break;
+
+        // Wait 时间统计指令
+        case CommandTag.wait: { // wait (uint32)
+          const ms = view.getUint32(offset, isLittleEndian);
+          blockMs += ms;
+          offset += 4;
+          break;
+        }
+        case CommandTag.wait_u8: { // wait_u8 (uint8)
+          const ms = view.getUint8(offset);
+          blockMs += ms;
+          offset += 1;
+          break;
+        }
+        case CommandTag.wait_u16: { // wait_u16 (uint16)
+          const ms = view.getUint16(offset, isLittleEndian);
+          blockMs += ms;
+          offset += 2;
+          break;
+        }
+
+        // Repeat 循环嵌套处理
+        case CommandTag.repeat: { // repeat (uint32 times)
+          const times = view.getUint32(offset, isLittleEndian);
+          offset += 4;
+          const innerMs = parseBlock();
+          blockMs += innerMs * times;
+          break;
+        }
+        case CommandTag.repeat_u16: { // repeat_u16 (uint16 times)
+          const times = view.getUint16(offset, isLittleEndian);
+          offset += 2;
+          const innerMs = parseBlock();
+          blockMs += innerMs * times;
+          break;
+        }
+        case CommandTag.repeat_u8: { // repeat_u8 (uint8 times)
+          const times = view.getUint8(offset);
+          offset += 1;
+          const innerMs = parseBlock();
+          blockMs += innerMs * times;
+          break;
+        }
+
+        default:
+          break;
+      }
+    }
+
+    return blockMs;
+  }
+
+  const totalMs = parseBlock();
+
+  return {
+    totalMs,
+    formatted: formatDuration(totalMs),
+  };
+}

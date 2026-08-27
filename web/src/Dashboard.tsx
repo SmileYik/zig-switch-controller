@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { esp32Api, ApiError } from './api';
 import type { MemoryStatus, QueueStatus, WifiConfig } from './api';
 import './Dashboard.css';
-import { compile } from './macroCompiler';
+import { calculateBytecodeWaitTime, compile } from './macroCompiler';
 import { runScriptMacroInGroups } from './runner';
 import TomodachiLifeNormal from './pages/tomodachLife/TomodachiLifeNormal';
 
@@ -239,11 +239,21 @@ const CommandRunnerCard: React.FC<CommandRunnerCardProps> = ({
   type ButtonType = 'raw' | 'bytecode' | 'enqueue' | 'l-r' | 'a' | 'l-r-a';
   const [clickedButtonType, setClickedButtonType] = useState<ButtonType>("raw");
 
+  const bytecode = compile(rawScript);
+  let formatted = "";
+  if (bytecode) {
+    const r = calculateBytecodeWaitTime(bytecode);
+    formatted = r.formatted;
+  }
+
   return (
     <div className="command-section">
       <div className="section-header">
         <Icons.Code />
         <h2 className="section-title">快速运行宏脚本</h2>
+        {rawScript.trim() && (
+          <span>预计时间: {formatted}</span>
+        )}
       </div>
 
       <textarea
@@ -253,6 +263,7 @@ const CommandRunnerCard: React.FC<CommandRunnerCardProps> = ({
         placeholder="在此输入需要同步解析运行的指令脚本..."
         className="script-textarea"
       />
+
 
       <div className="action-row-right">
 

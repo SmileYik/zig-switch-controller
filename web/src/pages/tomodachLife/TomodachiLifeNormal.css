@@ -1,0 +1,278 @@
+/* Material Design 3 Token 定义 */
+:root {
+  --md-color-primary: #0061a4;
+  --md-color-on-primary: #ffffff;
+  --md-color-primary-container: #d1e4ff;
+  --md-color-on-primary-container: #001d36;
+  --md-color-surface: #f8f9ff;
+  /* --md-color-surface-container: #f0f4f9; */
+  --md-color-surface-container-high: #e2e8f0;
+  --md-color-on-surface: #191c20;
+  --md-color-on-surface-variant: #43474e;
+  --md-color-outline: #73777f;
+  --md-color-outline-variant: #c3c7d0;
+  --md-color-error: #ba1a1a;
+  --md-color-error-container: #ffdad6;
+  --md-color-on-error-container: #410002;
+  --md-color-inverse-surface: #2e3135;
+  --md-color-inverse-on-surface: #f0f0f4;
+
+  --md-radius-s: 8px;
+  --md-radius-m: 12px;
+  --md-radius-l: 16px;
+  --md-radius-xl: 28px;
+  --md-radius-full: 9999px;
+
+  --md-shadow-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+  --md-shadow-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+}
+
+.m3-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--md-color-on-surface);
+  background-color: var(--md-color-surface);
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+/* Header & Title */
+.m3-header {
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.m3-header h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--md-color-on-surface);
+  margin: 0 0 16px 0;
+}
+
+/* MD3 Card Layout */
+.m3-card {
+  background-color: var(--md-color-surface-container);
+  border-radius: var(--md-radius-l);
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid var(--md-color-outline-variant);
+  transition: box-shadow 0.2s ease;
+}
+
+.m3-card-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  color: var(--md-color-on-surface);
+}
+
+/* Form Controls & Inputs */
+.m3-controls-bar {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.m3-input-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--md-color-on-surface-variant);
+}
+
+.m3-input {
+  background: var(--md-color-surface);
+  border: 1px solid var(--md-color-outline);
+  border-radius: var(--md-radius-s);
+  padding: 6px 10px;
+  color: var(--md-color-on-surface);
+  outline: none;
+  font-size: 0.875rem;
+}
+
+.m3-input:focus {
+  border-color: var(--md-color-primary);
+  border-width: 2px;
+}
+
+/* MD3 Buttons */
+.m3-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--md-radius-full);
+  padding: 10px 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.m3-btn-filled {
+  background-color: var(--md-color-primary);
+  color: var(--md-color-on-primary);
+}
+
+.m3-btn-filled:hover {
+  box-shadow: var(--md-shadow-1);
+  opacity: 0.92;
+}
+
+.m3-btn-filled:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.m3-btn-tonal {
+  background-color: var(--md-color-primary-container);
+  color: var(--md-color-on-primary-container);
+}
+
+.m3-btn-outlined {
+  background-color: transparent;
+  border: 1px solid var(--md-color-outline);
+  color: var(--md-color-primary);
+}
+
+.m3-btn-danger {
+  background-color: var(--md-color-error-container);
+  color: var(--md-color-on-error-container);
+}
+
+/* Canvas / Viewport */
+.m3-viewport-container {
+  position: relative;
+  margin: 0 auto;
+  background-color: #121212;
+  border-radius: var(--md-radius-m);
+  overflow: hidden;
+  user-select: none;
+  box-shadow: var(--md-shadow-2);
+}
+
+.m3-viewport-mask {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 calc((360px - 256px) / 2) rgba(0, 0, 0, 0.65);
+}
+
+.m3-crop-box {
+  position: absolute;
+  border: 2px solid #4ade80;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.m3-start-point {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background-color: #ef4444;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 4px #ffffff;
+}
+
+/* Layout Grid */
+.m3-result-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 840px) {
+  .m3-result-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Palette & Previews */
+.m3-preview-img {
+  width: 256px;
+  height: 256px;
+  border-radius: var(--md-radius-s);
+  border: 1px solid var(--md-color-outline-variant);
+  background-color: #fff;
+}
+
+.m3-palette-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0 8px 0;
+}
+
+.m3-palette-grid {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.m3-palette-chip {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--md-radius-s);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: transform 0.1s ease;
+}
+
+.m3-palette-chip:hover {
+  transform: scale(1.1);
+}
+
+.m3-code-block {
+  width: 100%;
+  height: 420px;
+  font-family: 'Fira Code', Consolas, monospace;
+  font-size: 12px;
+  background-color: #1a1c1e;
+  color: #a6e22e;
+  padding: 16px;
+  border-radius: var(--md-radius-m);
+  border: 1px solid var(--md-color-outline-variant);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+/* Modal Dialog */
+.color-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.color-modal-content {
+  background-color: var(--md-color-surface-container-high);
+  padding: 24px;
+  border-radius: var(--md-radius-xl);
+  box-shadow: var(--md-shadow-2);
+  min-width: 300px;
+  color: var(--md-color-on-surface);
+}
+
+.m3-color-preview-box {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--md-radius-s);
+  border: 1px solid var(--md-color-outline);
+}

@@ -4,6 +4,7 @@ import type { MemoryStatus, QueueStatus, WifiConfig } from './api';
 import './Dashboard.css';
 import { compile } from './macroCompiler';
 import { runScriptMacroInGroups } from './runner';
+import TomodachiLifeNormal from './pages/tomodachLife/TomodachiLifeNormal';
 
 // ==========================================
 // Inline Icons
@@ -217,7 +218,7 @@ interface CommandRunnerCardProps {
   onChangeScript: (value: string) => void;
   onRun: () => void;
   executing: boolean;
-  onRunBytecode: () => void;
+  onRunBytecode: (script: string) => void;
   onEnqueue: (chunkSize: number) => void;
   onStopEnqueue: () => void;
   currentGroupIdx: number,
@@ -235,7 +236,7 @@ const CommandRunnerCard: React.FC<CommandRunnerCardProps> = ({
   executing,
 }) => {
 
-  type ButtonType = 'raw' | 'bytecode' | 'enqueue';
+  type ButtonType = 'raw' | 'bytecode' | 'enqueue' | 'l-r' | 'a' | 'l-r-a';
   const [clickedButtonType, setClickedButtonType] = useState<ButtonType>("raw");
 
   return (
@@ -254,9 +255,38 @@ const CommandRunnerCard: React.FC<CommandRunnerCardProps> = ({
       />
 
       <div className="action-row-right">
+
+        {(!executing || clickedButtonType === 'l-r') &&
+          <button
+            onClick={() => {
+              onRunBytecode("TAP 70ms 70ms L R"); 
+              setClickedButtonType('l-r');
+            }}
+            disabled={executing}
+            title='同时按下 L-R'
+            className="primary-action-btn"
+          >
+            {executing ? '执行中...' : '同时按下 L-R'}
+          </button>
+        }
+
+        {(!executing || clickedButtonType === 'a') &&
+          <button
+            onClick={() => {
+              onRunBytecode("TAP 70ms 70ms A"); 
+              setClickedButtonType('a');
+            }}
+            disabled={executing}
+            title='按下 A'
+            className="primary-action-btn"
+          >
+            {executing ? '执行中...' : '按下 A'}
+          </button>
+        }
+
         {(!executing || clickedButtonType === 'bytecode') &&
           <button
-            onClick={() => {onRunBytecode(); setClickedButtonType('bytecode')}}
+            onClick={() => {onRunBytecode(rawScript); setClickedButtonType('bytecode')}}
             disabled={executing || !rawScript.trim()}
             title='将脚本编译成字节码后立即同步运行'
             className="primary-action-btn"
@@ -508,11 +538,11 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleRunBytecode = async () => {
-    if (!rawScript.trim()) return;
+  const handleRunBytecode = async (script: string) => {
+    if (!script.trim()) return;
     setExecutingCmd(true);
     try {
-      const bytecode = compile(rawScript);
+      const bytecode = compile(script);
       if (bytecode) {
         await esp32Api.runCommandSync(bytecode)
       }
@@ -542,7 +572,10 @@ export const Dashboard: React.FC = () => {
           setGroupIdx(idx);
           setTotalGroups(groupSize);
           while (true) {
-          if (stopExecuting.current) return true;
+            if (stopExecuting.current) {
+              setGroupIdx(0);
+              return true;
+            }
 
             try {
               await esp32Api.enqueueCommand(bytecode);
@@ -585,7 +618,7 @@ export const Dashboard: React.FC = () => {
         {/* Header App Bar */}
         <header className="header">
           <div>
-            <h1 className="header-title">Zig Switch Controller 控制面板</h1>
+            <h1 className="header-title">Zig ESP32 Switch Controller 控制面板</h1>
           </div>
 
           <div className="header-actions">
@@ -642,6 +675,14 @@ export const Dashboard: React.FC = () => {
           currentGroupIdx={groupIdx}
           executing={executingCmd}
         />
+
+        <div className="command-section">
+          <div className="section-header">
+            <Icons.Queue />
+            <h2 className="section-title">Tomodachi Life 标准面纹</h2>
+          </div>
+          <TomodachiLifeNormal/>
+        </div>
       </div>
 
       {/* Wi-Fi Edit Modal */}

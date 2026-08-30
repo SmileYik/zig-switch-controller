@@ -229,16 +229,19 @@ function TomodachiLifeNormal() {
 
     let curColorPanelIdx = 0;
 
-    const tap = (button: string) => lines.push(`TAP ${delay}ms ${delay}ms ${button}`);
+    const tap = (button: string, space: number = 0) => lines.push(`${" ".repeat(space)} TAP ${delay}ms ${delay}ms ${button}`);
     const tapMultiple = (button: string, count: number) => {
       if (count <= 0) return;
       if (count === 1) tap(button);
       else {
         lines.push(`REPEAT ${count}`);
-        tap(button);
+        tap(button, 2);
         lines.push('END');
       }
     };
+    const wait = (ms: number) => {
+      lines.push(`WAIT ${ms}`);
+    }
 
     const initColorPanel = () => {
       lines.push('# --- 初始化调色板面板 ---');
@@ -249,6 +252,7 @@ function TomodachiLifeNormal() {
       tap('R');
       tap('R');
       tap('R');
+      wait(100);
       tap('A');
       curColorPanelIdx = 0;
     };
@@ -264,13 +268,15 @@ function TomodachiLifeNormal() {
 
     const resetHSVColorPanel = () => {
       lines.push('# --- 复位 HSV 调色板 ---');
-      tap('R');
-      tap('R');
+      wait(100);
       lines.push('STICK LEFT_STICK -100 +100');
+      wait(100);
       lines.push('DOWN ZL');
-      lines.push('WAIT 5000ms');
+      wait(5000);
       lines.push('UP ZL');
+      wait(100);
       lines.push('RESET_STICK LEFT_STICK');
+      wait(100);
     };
 
     const chooseHSVColor = (slotIdx: number, colorIdx: number) => {
@@ -279,14 +285,23 @@ function TomodachiLifeNormal() {
       const hsv = rgbToTomodachiHSV(color.r, color.g, color.b);
 
       lines.push(`\n# 配置色槽 Slot ${slotIdx} <- 调色板颜色 ${colorIdx}: RGB(${color.r},${color.g},${color.b})`);
+      wait(100);
       chooseColorPanel(slotIdx);
+      wait(100);
       tap('Y');
+      wait(100);
       tap('Y');
+      wait(100);
       resetHSVColorPanel();
+      wait(100);
       tapMultiple('ZR', hsv.hTicks);
+      wait(100);
       tapMultiple('DPAD_RIGHT', hsv.sTicks);
+      wait(100);
       tapMultiple('DPAD_DOWN', hsv.vTicks);
+      wait(100);
       tap('A');
+      wait(100);
     };
 
     initColorPanel();
@@ -335,7 +350,6 @@ function TomodachiLifeNormal() {
       for (let i = 0; i < 9; i++) {
         if (colorBatchStart + i < colorSize) {
           chooseHSVColor(i, colorBatchStart + i);
-          tap('DPAD_DOWN');
         }
       }
 

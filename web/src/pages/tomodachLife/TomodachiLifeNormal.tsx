@@ -4,6 +4,7 @@ import { type PixelData, type RGBColor } from './color';
 import { generateZigMacroScriptBySegment } from './macroAlgorithm';
 import { generateZigByteArray, loadImageFromZigByteArray } from './image';
 import ColorPickerModal from './ColorPickerModal';
+import ImageEditorModal from './ImageEditorModal';
 
 interface TomodachiLifeNormalProps {
   onChangeScript: (value: string) => void;
@@ -39,6 +40,8 @@ function TomodachiLifeNormal({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [showEditorModal, setShowEditorModal] = useState<boolean>(false);
 
   const quantizePixels = (rawPixels: PixelData[][], k: number, w: number, h: number) => {
     const validPixels: RGBColor[] = [];
@@ -559,6 +562,12 @@ function TomodachiLifeNormal({
                   })}
                 </div>
 
+                <div style={{ marginTop: '10px' }}>
+                  <button className="m3-btn m3-btn-tonal" style={{ width: '100%' }} onClick={() => setShowEditorModal(true)}>
+                    编辑图像
+                  </button>
+                </div>
+
                 {/* 二进制导出 Card */}
                 <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--md-color-outline-variant)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>Zig 格式字节数组</h4>
@@ -620,6 +629,16 @@ function TomodachiLifeNormal({
             updateRenderOutput(pixelIndices, colors);
           }}
         ></ColorPickerModal>
+      )}
+
+      {showEditorModal && byteArray && (
+        <ImageEditorModal
+          byteArray={byteArray}
+          onConfirm={(updatedBuffer) => {
+            handleBinLoad(updatedBuffer);
+          }}
+          onClose={() => setShowEditorModal(false)}
+        />
       )}
     </div>
   );

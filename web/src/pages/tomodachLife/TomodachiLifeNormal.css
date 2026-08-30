@@ -276,3 +276,157 @@
   border-radius: var(--md-radius-s);
   border: 1px solid var(--md-color-outline);
 }
+
+/* 二维网格编辑器 Modal 样式 */
+.m3-editor-modal-container {
+  background: var(--md-color-surface);
+  border-radius: var(--md-radius-l);
+  padding: 20px;
+  width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--md-shadow-2);
+  border: 1px solid var(--md-color-outline-variant);
+  box-sizing: border-box;
+}
+
+.m3-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.m3-editor-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.m3-btn-icon {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: var(--md-color-on-surface-variant);
+}
+
+.m3-editor-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--md-color-outline-variant);
+}
+
+/* 调色板编辑器 */
+.m3-editor-palette-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: var(--md-color-surface-container-high);
+  border-radius: var(--md-radius-m);
+}
+
+.m3-palette-chip-editor {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  height: 32px;
+  border-radius: var(--md-radius-s);
+  border: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+  font-weight: bold;
+  box-sizing: border-box;
+}
+
+.m3-palette-chip-editor.selected {
+  border-color: var(--md-color-primary);
+  box-shadow: 0 0 0 2px var(--md-color-primary-container);
+}
+
+.m3-palette-chip-editor input[type="color"] {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.m3-chip-delete-btn {
+  margin-left: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  line-height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.m3-chip-delete-btn:hover, 
+.m3-palette-chip-editor.selected .m3-chip-pick-btn {
+  background: var(--md-color-error);
+}
+
+.m3-editor-grid-scroll-panel {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--md-color-outline-variant);
+  border-radius: var(--md-radius-m);
+  background: #f0f0f0;
+  max-height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+  text-align: center; /* 尺寸较小时水平居中 */
+}
+
+.m3-editor-grid-scroll-panel canvas {
+  display: inline-block;
+  vertical-align: middle;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background-color: #fff;
+}
+
+.m3-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* 预览 Modal */
+.m3-preview-modal-content {
+  background: var(--md-color-surface);
+  padding: 20px;
+  border-radius: var(--md-radius-l);
+  box-shadow: var(--md-shadow-2);
+  text-align: center;
+}
+
+.m3-preview-canvas-box {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 12px;
+  background: #e5e5e5;
+  border-radius: var(--md-radius-m);
+  max-width: 80vw;
+  max-height: 70vh;
+  overflow: auto;
+}

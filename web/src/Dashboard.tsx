@@ -692,7 +692,7 @@ export const Dashboard: React.FC = () => {
             <Icons.Queue />
             <h2 className="section-title">Tomodachi Life 标准面纹</h2>
           </div>
-          <TomodachiLifeNormal/>
+          <TomodachiLifeNormal onChangeScript={setRawScript}/>
         </div>
       </div>
 

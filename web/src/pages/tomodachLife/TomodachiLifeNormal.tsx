@@ -1,31 +1,18 @@
 import React, { useState, useRef, useMemo } from 'react';
 import './TomodachiLifeNormal.css';
+import { hexToRgb, rgbToHex, rgbToTomodachiHSV, tomodachiHSVToRgb, type PixelData, type RGBColor } from './color';
+import { generateZigMacroScriptBySegment } from './macroAlgorithm';
 
-type RGBColor = { r: number; g: number; b: number };
-type PixelData = RGBColor | null;
+interface TomodachiLifeNormalProps {
+  onChangeScript: (value: string) => void;
+}
 
-type TomodachiHSV = {
-  hTicks: number;
-  sTicks: number;
-  vTicks: number;
-};
-
-const rgbToHex = (c: RGBColor) =>
-  '#' + [c.r, c.g, c.b].map((x) => x.toString(16).padStart(2, '0')).join('');
-
-const hexToRgb = (hex: string): RGBColor => {
-  const num = parseInt(hex.replace('#', ''), 16);
-  return {
-    r: (num >> 16) & 255,
-    g: (num >> 8) & 255,
-    b: num & 255,
-  };
-};
-
-function TomodachiLifeNormal() {
+function TomodachiLifeNormal({
+  onChangeScript
+}: TomodachiLifeNormalProps) {
   const [cropWidth, setCropWidth] = useState<number>(256);
   const [cropHeight, setCropHeight] = useState<number>(256);
-  const [delayMs, setDelayMs] = useState<number>(70);
+  const [delayMs, setDelayMs] = useState<number>(80);
 
   const [originalImage, setOriginalImage] = useState<HTMLImageElement | null>(null);
   const [croppedImage, setCroppedImage] = useState<HTMLImageElement | null>(null);
@@ -35,7 +22,6 @@ function TomodachiLifeNormal() {
   const [currentPalette, setCurrentPalette] = useState<RGBColor[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
-  const [macroScript, setMacroScript] = useState<string>('');
   const [byteArray, setByteArray] = useState<Uint8Array | null>(null);
 
   const [colorCount, setColorCount] = useState<number>(4);
@@ -51,57 +37,6 @@ function TomodachiLifeNormal() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // RGB 转 Tomodachi HSV
-  const rgbToTomodachiHSV = (r: number, g: number, b: number): TomodachiHSV => {
-    const rf = r / 255, gf = g / 255, bf = b / 255;
-    const max = Math.max(rf, gf, bf), min = Math.min(rf, gf, bf);
-    const delta = max - min;
-
-    let h = 0;
-    if (delta !== 0) {
-      if (max === rf) h = ((gf - bf) / delta) % 6;
-      else if (max === gf) h = (bf - rf) / delta + 2;
-      else h = (rf - gf) / delta + 4;
-      h = Math.round(h * 60);
-      if (h < 0) h += 360;
-    }
-
-    const s = max === 0 ? 0 : delta / max;
-    const v = max;
-
-    const hTicks = Math.floor((((360 - h) % 360) / 360) * 201);
-    const sTicks = Math.round(s * 212);
-    const vTicks = Math.round((1 - v) * 111);
-
-    return { hTicks, sTicks, vTicks };
-  };
-
-  // Tomodachi HSV 刻度转 RGB
-  const tomodachiHSVToRgb = (hTicks: number, sTicks: number, vTicks: number): RGBColor => {
-    let h = (360 - (hTicks / 201) * 360) % 360;
-    if (h < 0) h += 360;
-    const s = Math.min(1, Math.max(0, sTicks / 212));
-    const v = Math.min(1, Math.max(0, 1 - vTicks / 111));
-
-    const c = v * s;
-    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-    const m = v - c;
-
-    let r = 0, g = 0, b = 0;
-    if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
-    else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
-    else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
-    else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
-    else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
-    else { r = c; g = 0; b = x; }
-
-    return {
-      r: Math.round((r + m) * 255),
-      g: Math.round((g + m) * 255),
-      b: Math.round((b + m) * 255),
-    };
-  };
 
   const quantizePixels = (rawPixels: PixelData[][], k: number, w: number, h: number) => {
     const validPixels: RGBColor[] = [];
@@ -214,177 +149,6 @@ function TomodachiLifeNormal() {
     return buffer;
   };
 
-  const generateZigMacroScript = (
-    w: number,
-    h: number,
-    palette: RGBColor[],
-    pIndices: (number | null)[][],
-    delay: number
-  ): string => {
-    const lines: string[] = [];
-    lines.push('# ==========================================');
-    lines.push('# Tomodachi Life 自动化绘制宏脚本 (基于路径优化)');
-    lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
-    lines.push('# ==========================================\n');
-
-    let curColorPanelIdx = 0;
-
-    const tap = (button: string, space: number = 0) => lines.push(`${" ".repeat(space)} TAP ${delay}ms ${delay}ms ${button}`);
-    const tapMultiple = (button: string, count: number) => {
-      if (count <= 0) return;
-      if (count === 1) tap(button);
-      else {
-        lines.push(`REPEAT ${count}`);
-        tap(button, 2);
-        lines.push('END');
-      }
-    };
-    const wait = (ms: number) => {
-      lines.push(`WAIT ${ms}`);
-    }
-
-    const initColorPanel = () => {
-      lines.push('# --- 初始化调色板面板 ---');
-      tap('Y');
-      tapMultiple('DPAD_DOWN', 10);
-      tapMultiple('DPAD_UP', 8);
-      tap('Y');
-      tap('R');
-      tap('R');
-      tap('R');
-      wait(100);
-      tap('A');
-      curColorPanelIdx = 0;
-    };
-
-    const chooseColorPanel = (idx: number) => {
-      if (curColorPanelIdx === idx) return;
-      tap('Y');
-      if (idx > curColorPanelIdx) tapMultiple('DPAD_DOWN', idx - curColorPanelIdx);
-      else tapMultiple('DPAD_UP', curColorPanelIdx - idx);
-      curColorPanelIdx = idx;
-      tap('A');
-    };
-
-    const resetHSVColorPanel = () => {
-      lines.push('# --- 复位 HSV 调色板 ---');
-      wait(100);
-      lines.push('STICK LEFT_STICK -100 +100');
-      wait(100);
-      lines.push('DOWN ZL');
-      wait(5000);
-      lines.push('UP ZL');
-      wait(100);
-      lines.push('RESET_STICK LEFT_STICK');
-      wait(100);
-    };
-
-    const chooseHSVColor = (slotIdx: number, colorIdx: number) => {
-      const color = palette[colorIdx - 1];
-      if (!color) return;
-      const hsv = rgbToTomodachiHSV(color.r, color.g, color.b);
-
-      lines.push(`\n# 配置色槽 Slot ${slotIdx} <- 调色板颜色 ${colorIdx}: RGB(${color.r},${color.g},${color.b})`);
-      wait(100);
-      chooseColorPanel(slotIdx);
-      wait(100);
-      tap('Y');
-      wait(100);
-      tap('Y');
-      wait(100);
-      resetHSVColorPanel();
-      wait(100);
-      tapMultiple('ZR', hsv.hTicks);
-      wait(100);
-      tapMultiple('DPAD_RIGHT', hsv.sTicks);
-      wait(100);
-      tapMultiple('DPAD_DOWN', hsv.vTicks);
-      wait(100);
-      tap('A');
-      wait(100);
-    };
-
-    initColorPanel();
-
-    const colorSize = palette.length + 1;
-    let colorBatchStart = 1;
-    let curX = 0;
-    let curY = 0;
-
-    const moveTo = (targetX: number, targetY: number) => {
-      const dx = targetX - curX;
-      const dy = targetY - curY;
-
-      if (dx > 0) tapMultiple('DPAD_RIGHT', dx);
-      else if (dx < 0) tapMultiple('DPAD_LEFT', -dx);
-
-      if (dy > 0) tapMultiple('DPAD_DOWN', dy);
-      else if (dy < 0) tapMultiple('DPAD_UP', -dy);
-
-      curX = targetX;
-      curY = targetY;
-    };
-
-    while (colorBatchStart < colorSize) {
-      const colorBatchEnd = Math.min(colorBatchStart + 8, colorSize - 1);
-      const targetPixels: { x: number; y: number; slot: number }[] = [];
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const pixelIdx = pIndices[y]?.[x];
-          const pixel = pixelIdx !== undefined && pixelIdx !== null ? pixelIdx + 1 : 0;
-          if (pixel >= colorBatchStart && pixel <= colorBatchEnd) {
-            targetPixels.push({ x, y, slot: pixel - colorBatchStart });
-          }
-        }
-      }
-
-      if (targetPixels.length === 0) {
-        colorBatchStart += 9;
-        continue;
-      }
-
-      lines.push(`\n# ==========================================`);
-      lines.push(`# 绘制批次: 颜色 Index ${colorBatchStart} ~ ${colorBatchEnd} (有效像素数: ${targetPixels.length})`);
-      lines.push(`# ==========================================`);
-
-      for (let i = 0; i < 9; i++) {
-        if (colorBatchStart + i < colorSize) {
-          chooseHSVColor(i, colorBatchStart + i);
-        }
-      }
-
-      lines.push(`\n# 开始离散像素点对点精准绘制...`);
-      const remaining = [...targetPixels];
-
-      while (remaining.length > 0) {
-        let bestIdx = 0;
-        let minDist = Infinity;
-
-        for (let i = 0; i < remaining.length; i++) {
-          const dist = Math.abs(remaining[i].x - curX) + Math.abs(remaining[i].y - curY);
-          if (dist < minDist) {
-            minDist = dist;
-            bestIdx = i;
-          }
-        }
-
-        const target = remaining[bestIdx];
-        remaining.splice(bestIdx, 1);
-
-        moveTo(target.x, target.y);
-        chooseColorPanel(target.slot);
-        tap('A');
-      }
-
-      colorBatchStart += 9;
-    }
-
-    lines.push(`\n# 全图绘制完成，复位光标至 (0,0)`);
-    moveTo(0, 0);
-
-    return lines.join('\n');
-  };
-
   const updateRenderOutput = (pIndices: (number | null)[][], palette: RGBColor[]) => {
     const canvas = document.createElement('canvas');
     canvas.width = cropWidth;
@@ -418,9 +182,6 @@ function TomodachiLifeNormal() {
 
     const bin = generateZigByteArray(cropWidth, cropHeight, palette, pIndices);
     setByteArray(bin);
-
-    const script = generateZigMacroScript(cropWidth, cropHeight, palette, pIndices, delayMs);
-    setMacroScript(script);
   };
 
   // 解析并装载二进制文件 (.bin)
@@ -506,8 +267,6 @@ function TomodachiLifeNormal() {
       }
 
       setByteArray(buffer);
-      const script = generateZigMacroScript(w, h, palette, pIndices, delayMs);
-      setMacroScript(script);
     };
     reader.readAsArrayBuffer(file);
   };
@@ -626,7 +385,6 @@ function TomodachiLifeNormal() {
     setOriginalPalette([]);
     setCurrentPalette([]);
     setEditingIndex(null);
-    setMacroScript('');
     setByteArray(null);
     setIsCropping(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -634,7 +392,7 @@ function TomodachiLifeNormal() {
 
   const downloadScript = () => {
     const element = document.createElement('a');
-    const file = new Blob([macroScript], { type: 'text/plain' });
+    const file = new Blob([finalScript], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
     element.download = 'tomodachi_macro.txt';
     document.body.appendChild(element);
@@ -659,6 +417,10 @@ function TomodachiLifeNormal() {
     const hex = Array.from(slice).map((b) => b.toString(16).padStart(2, '0')).join(' ');
     return byteArray.length > 128 ? `${hex} ... (共 ${byteArray.length} 字节)` : hex;
   }, [byteArray]);
+
+  const finalScript = useMemo(() => {
+    return generateZigMacroScriptBySegment(cropWidth, cropHeight, currentPalette, pixelIndices, delayMs);
+  }, [cropWidth, cropHeight, delayMs, currentPalette, pixelIndices]);
 
   const VIEWPORT_WIDTH = Math.max(360, cropWidth + 80);
   const VIEWPORT_HEIGHT = Math.max(360, cropHeight + 80);
@@ -737,19 +499,6 @@ function TomodachiLifeNormal() {
                         });
                       }
                     }}
-                    className="m3-input"
-                    style={{ width: '100px' }}
-                  />
-                </label>
-
-                <label className="m3-input-field">
-                  延迟 (ms):
-                  <input
-                    type="number"
-                    min="10"
-                    max="1000"
-                    value={delayMs}
-                    onChange={(e) => setDelayMs(Math.max(10, parseInt(e.target.value) || 70))}
                     className="m3-input"
                     style={{ width: '100px' }}
                   />
@@ -898,18 +647,34 @@ function TomodachiLifeNormal() {
               {/* 右侧脚本输出区 */}
               <div className="m3-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 className="m3-card-title" style={{ margin: 0 }}>手柄按键宏脚本</h3>
+                  <h3 className="m3-card-title" style={{ margin: 0 }}>宏脚本</h3>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="m3-btn m3-btn-outlined" onClick={() => navigator.clipboard.writeText(macroScript)}>
-                      复制脚本
+
+                    <label className="m3-input-field">
+                      延迟:
+                      <input
+                        type="number"
+                        min="10"
+                        max="1000"
+                        value={delayMs}
+                        onChange={(e) => setDelayMs(parseInt(e.target.value) || 80)}
+                        className="m3-input"
+                        style={{ width: '100px' }}
+                      />
+                    </label>
+                    <button className="m3-btn m3-btn-outlined" onClick={() => navigator.clipboard.writeText(finalScript)}>
+                      复制
                     </button>
-                    <button className="m3-btn m3-btn-filled" onClick={downloadScript}>
-                      下载宏脚本
+                    <button className="m3-btn m3-btn-outlined" onClick={downloadScript}>
+                      下载
+                    </button>
+                    <button className="m3-btn m3-btn-filled" onClick={() => onChangeScript(finalScript)}>
+                      准备运行
                     </button>
                   </div>
                 </div>
 
-                <textarea readOnly value={macroScript} className="m3-code-block" />
+                <textarea readOnly value={finalScript} className="m3-code-block" />
               </div>
             </div>
           )}

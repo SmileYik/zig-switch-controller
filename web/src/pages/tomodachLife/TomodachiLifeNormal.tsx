@@ -1,7 +1,8 @@
 import React, { useState, useRef, useMemo } from 'react';
 import './TomodachiLifeNormal.css';
-import { hexToRgb, rgbToHex, rgbToTomodachiHSV, tomodachiHSVToRgb, type PixelData, type RGBColor } from './color';
+import { hexToRgb, rgbToHex, type PixelData, type RGBColor } from './color';
 import { generateZigMacroScriptBySegment } from './macroAlgorithm';
+import { generateZigByteArray, loadImageFromZigByteArray } from './image';
 
 interface TomodachiLifeNormalProps {
   onChangeScript: (value: string) => void;
@@ -110,45 +111,6 @@ function TomodachiLifeNormal({
     return { palette: centroids, pixelIndices: pixelIndicesResult, quantizedData };
   };
 
-  const generateZigByteArray = (
-    w: number,
-    h: number,
-    palette: RGBColor[],
-    pIndices: (number | null)[][]
-  ): Uint8Array => {
-    const colorSize = palette.length + 1;
-    const headerSize = 5;
-    const colorTableSize = palette.length * 3;
-    const pixelTableSize = w * h;
-
-    const buffer = new Uint8Array(headerSize + colorTableSize + pixelTableSize);
-
-    buffer[0] = w & 0xff;
-    buffer[1] = (w >> 8) & 0xff;
-    buffer[2] = h & 0xff;
-    buffer[3] = (h >> 8) & 0xff;
-    buffer[4] = colorSize;
-
-    palette.forEach((color, i) => {
-      const hsv = rgbToTomodachiHSV(color.r, color.g, color.b);
-      const offset = 5 + i * 3;
-      buffer[offset] = hsv.hTicks;
-      buffer[offset + 1] = hsv.sTicks;
-      buffer[offset + 2] = hsv.vTicks;
-    });
-
-    const pixelStartOffset = 5 + palette.length * 3;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const idx = y * w + x;
-        const colorIdx = pIndices[y]?.[x];
-        buffer[pixelStartOffset + idx] = colorIdx !== undefined && colorIdx !== null ? colorIdx + 1 : 0;
-      }
-    }
-
-    return buffer;
-  };
-
   const updateRenderOutput = (pIndices: (number | null)[][], palette: RGBColor[]) => {
     const canvas = document.createElement('canvas');
     canvas.width = cropWidth;
@@ -180,93 +142,68 @@ function TomodachiLifeNormal({
     croppedImg.onload = () => setCroppedImage(croppedImg);
     croppedImg.src = canvas.toDataURL('image/png');
 
-    const bin = generateZigByteArray(cropWidth, cropHeight, palette, pIndices);
+    const bin = generateZigByteArray({width: cropWidth, height: cropHeight, palette, pIndices});
     setByteArray(bin);
   };
 
   // 解析并装载二进制文件 (.bin)
+  const handleBinLoad = (buffer: Uint8Array) => {
+    const image = loadImageFromZigByteArray(buffer);
+    if (image == null) return;
+
+    const w = image.width;
+    const h = image.height;
+    const palette: RGBColor[] = image.palette;
+    const pIndices: (number | null)[][] = image.pIndices;
+
+    setCropWidth(w);
+    setCropHeight(h);
+    setPixelIndices(pIndices);
+    setOriginalPalette(palette);
+    setCurrentPalette(palette);
+    setColorCount(palette.length || 4);
+
+    // 生成像素预览图像
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const imgData = ctx.createImageData(w, h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const pixelIdx = (y * w + x) * 4;
+          const colorIdx = pIndices[y][x];
+          if (colorIdx !== null && palette[colorIdx]) {
+            const c = palette[colorIdx];
+            imgData.data[pixelIdx] = c.r;
+            imgData.data[pixelIdx + 1] = c.g;
+            imgData.data[pixelIdx + 2] = c.b;
+            imgData.data[pixelIdx + 3] = 255;
+          } else {
+            imgData.data[pixelIdx + 3] = 0;
+          }
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      const binImg = new Image();
+      binImg.onload = () => {
+        setOriginalImage(binImg);
+        setCroppedImage(binImg);
+        setIsCropping(false);
+      };
+      binImg.src = canvas.toDataURL('image/png');
+    }
+
+    setByteArray(buffer);
+  };
+
   const handleBinUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = (evt) => {
       const buffer = new Uint8Array(evt.target?.result as ArrayBuffer);
-      if (buffer.length < 5) return;
-
-      const w = buffer[0] | (buffer[1] << 8);
-      const h = buffer[2] | (buffer[3] << 8);
-      const colorSize = buffer[4];
-      const paletteLength = Math.max(0, colorSize - 1);
-
-      // 读取调色板 (每个颜色 3 字节)
-      const palette: RGBColor[] = [];
-      for (let i = 0; i < paletteLength; i++) {
-        const offset = 5 + i * 3;
-        if (offset + 2 < buffer.length) {
-          const hTicks = buffer[offset];
-          const sTicks = buffer[offset + 1];
-          const vTicks = buffer[offset + 2];
-          palette.push(tomodachiHSVToRgb(hTicks, sTicks, vTicks));
-        }
-      }
-
-      // 计算像素起始偏移量 (适配兼容性)
-      let pixelStartOffset = 5 + paletteLength * 3;
-      if (pixelStartOffset + w * h > buffer.length && 5 + colorSize * 3 + w * h <= buffer.length) {
-        pixelStartOffset = 5 + colorSize * 3;
-      }
-
-      // 读取像素矩阵
-      const pIndices: (number | null)[][] = [];
-      for (let y = 0; y < h; y++) {
-        const row: (number | null)[] = [];
-        for (let x = 0; x < w; x++) {
-          const idx = pixelStartOffset + y * w + x;
-          const val = idx < buffer.length ? buffer[idx] : 0;
-          row.push(val > 0 ? val - 1 : null);
-        }
-        pIndices.push(row);
-      }
-
-      setCropWidth(w);
-      setCropHeight(h);
-      setPixelIndices(pIndices);
-      setOriginalPalette(palette);
-      setCurrentPalette(palette);
-      setColorCount(palette.length || 4);
-
-      // 生成像素预览图像
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const imgData = ctx.createImageData(w, h);
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const pixelIdx = (y * w + x) * 4;
-            const colorIdx = pIndices[y][x];
-            if (colorIdx !== null && palette[colorIdx]) {
-              const c = palette[colorIdx];
-              imgData.data[pixelIdx] = c.r;
-              imgData.data[pixelIdx + 1] = c.g;
-              imgData.data[pixelIdx + 2] = c.b;
-              imgData.data[pixelIdx + 3] = 255;
-            } else {
-              imgData.data[pixelIdx + 3] = 0;
-            }
-          }
-        }
-        ctx.putImageData(imgData, 0, 0);
-
-        const binImg = new Image();
-        binImg.onload = () => {
-          setOriginalImage(binImg);
-          setCroppedImage(binImg);
-          setIsCropping(false);
-        };
-        binImg.src = canvas.toDataURL('image/png');
-      }
-
-      setByteArray(buffer);
+      handleBinLoad(buffer);
     };
     reader.readAsArrayBuffer(file);
   };

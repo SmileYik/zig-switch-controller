@@ -1,11 +1,11 @@
-# Zig Switch Controller
+# ESP32 Zig Switch Controller
 
 一个运行在 **ESP32-WROOM-32D** 上的 Nintendo Switch Pro Controller 模拟器,
 由 **Zig 0.16.0 + ESP-IDF + ESP32 + Bluetooth Classic HID** 强力驱动.
 
 ## 目录
 
-- [Zig Switch Controller](#zig-switch-controller)
+- [ESP32 Zig Switch Controller](#esp32-zig-switch-controller)
   - [目录](#目录)
   - [状态](#状态)
   - [功能](#功能)
@@ -18,8 +18,10 @@
     - [功能](#功能-1)
     - [访问 Web 页面](#访问-web-页面)
     - [HTTP API](#http-api)
-  - [📡 Bluetooth HID](#-bluetooth-hid)
+  - [Bluetooth HID](#bluetooth-hid)
   - [命令脚本](#命令脚本)
+    - [可用按键名称](#可用按键名称)
+    - [可用摇杆名称](#可用摇杆名称)
     - [基础按键输入](#基础按键输入)
     - [组合按键输入](#组合按键输入)
     - [摇杆输入](#摇杆输入)
@@ -91,7 +93,7 @@
 - CMake
 - Ninja
 - ESP-IDF 6.0.2
-- [Patched-Zig-Espressif-0.16.0]
+- [Patched-Zig-Espressif-0.16.0] (可选, 若没有会自动下载)
 
 ### 编译
 
@@ -105,7 +107,7 @@ idf.py build
 若要指定优化等级, 则可以使用
 
 ```shell
-idf.py reconfigure -DCMAKE_BUILD_TYPE=ReleaseSmall
+idf.py reconfigure -DCMAKE_BUILD_TYPE=ReleaseSafe
 idf.py build
 ```
 
@@ -157,7 +159,7 @@ idf.py -p <PORT> flash
 | `POST` | `/api?mode=/cmd/run/raw` | 直接执行指令脚本 |
 | `POST` | `/api?mode=/cmd/test` | 测试指令字节码 |
 
-## 📡 Bluetooth HID
+## Bluetooth HID
 
 ESP32 通过 Bluetooth Classic HID Device 模拟：
 
@@ -176,6 +178,40 @@ Provider:    Nintendo
 ## 命令脚本
 
 可以使用简单的文本命令控制手柄。
+
+### 可用按键名称
+
+| 图标 | 按键名称 | 描述 |
+|:-:|:-:|:-:|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="12" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">A</text></svg>|A|A键（确认键）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="12" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">B</text></svg>|B|B键（取消键）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="12" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">X</text></svg>|X|X键（特殊功能键）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="12" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="12" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">Y</text></svg>|Y|Y键（菜单键）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="11" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><path d="M 16,11 V 21 M 11,16 H 21" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/></svg>|PLUS|加号键（开始键）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="11" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><path d="M 11,16 H 21" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/></svg>|MINUS|减号键（返回键）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="15" fill="none" stroke="#e65c00" stroke-width="1"/><!-- 屋顶与房屋结构 --><path d="M 16,10 L 9,16 H 11 V 22 H 21 V 16 H 23 Z" fill="#ffffff"/></svg>|HOME|主菜单键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="4" y="4" width="24" height="24" rx="3" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="7" fill="none" stroke="#ffffff" stroke-width="2"/></svg>|CAPTURE|截图键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><path d="M 3,21 Q 3,8 16,8 Q 29,8 29,21 Z" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><path d="M 5,19 Q 5,10 16,10 Q 27,10 27,19 Z" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="16" font-family="Arial, sans-serif" font-weight="bold" font-size="9" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">L</text></svg>|L|左肩键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="2" y="3" width="28" height="26" rx="6" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><rect x="3" y="4" width="26" height="24" rx="5" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="19" font-family="Arial, sans-serif" font-weight="bold" font-size="11" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">ZL</text></svg>|ZL|左肩键（左Z触发器）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><path d="M 3,21 Q 3,8 16,8 Q 29,8 29,21 Z" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><path d="M 5,19 Q 5,10 16,10 Q 27,10 27,19 Z" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="16" font-family="Arial, sans-serif" font-weight="bold" font-size="9" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">R</text></svg>|R|右肩键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="2" y="3" width="28" height="26" rx="6" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><rect x="3" y="4" width="26" height="24" rx="5" fill="none" stroke="#43474e" stroke-width="0.7"/><text x="16" y="19" font-family="Arial, sans-serif" font-weight="bold" font-size="11" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">ZR</text></svg>|ZR|右肩键（右Z触发器）|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="11" fill="none" stroke="#5a5e66" stroke-width="1" stroke-dasharray="2 1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">L3</text></svg>|L_STICK_PRESSED|左摇杆按下|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="3" y="10" width="26" height="13" rx="7" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">SL</text></svg>|JCL_SL|左摇杆按键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="3" y="10" width="26" height="13" rx="7" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">SR</text></svg>|JCL_SR|左摇杆按键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="11" fill="none" stroke="#5a5e66" stroke-width="1" stroke-dasharray="2 1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">R3</text></svg>|R_STICK_PRESSED|右摇杆按下|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="3" y="10" width="26" height="13" rx="7" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">SL</text></svg>|JCR_SL|右摇杆按键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><rect x="3" y="10" width="26" height="13" rx="7" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">SR</text></svg>|JCR_SR|右摇杆按键|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><polygon points="20,10 10,16 20,22" fill="#ffffff"/></svg>|DPAD_LEFT|方向键左|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><polygon points="12,10 22,16 12,22" fill="#ffffff"/></svg>|DPAD_RIGHT|方向键右|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><polygon points="10,20 16,10 22,20" fill="#ffffff"/></svg>|DPAD_UP|方向键上|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><polygon points="10,12 16,22 22,12" fill="#ffffff"/></svg>|DPAD_DOWN|方向键下|
+
+### 可用摇杆名称
+
+| 图标 | 按键名称 | 描述 |
+|:-:|:-:|:-:|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="11" fill="none" stroke="#5a5e66" stroke-width="1" stroke-dasharray="2 1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">L</text></svg>|LEFT_STICK|左摇杆|
+|<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" style="vertical-align: middle;"><circle cx="16" cy="16" r="13" fill="#2d3035" stroke="#1a1c1e" stroke-width="1"/><circle cx="16" cy="16" r="11" fill="none" stroke="#5a5e66" stroke-width="1" stroke-dasharray="2 1"/><text x="16" y="17" font-family="Arial, sans-serif" font-weight="bold" font-size="7" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">R</text></svg>|RIGHT_STICK|右摇杆|
 
 ### 基础按键输入
 

@@ -1098,10 +1098,10 @@ export const generateZigMacroScriptDFS = (
     pixels: Point[];
   };
 
-  type DfsFrame = {
-    x: number;
-    y: number;
-    nextDir: number;
+  type DfsTree = {
+    parent: Int32Array;
+    depth: Int32Array;
+    deepest: number;
   };
 
   const context = createZigMacroScriptContext(w, h, palette, pIndices, delay);
@@ -1116,197 +1116,107 @@ export const generateZigMacroScriptDFS = (
     chooseHSVColor,
     moveTo,
     getId,
-    directionFromTo,
     manhattanDistance,
   } = context;
+
+  // lines.push('# ==========================================');
+  // lines.push('# Tomodachi Life 自动化绘制宏脚本');
+  // lines.push('#');
+  // lines.push('# DFS 路径优化策略：');
+  // lines.push('# 1. 一次扫描整张图，建立每种颜色的 4 邻接连通块');
+  // lines.push('# 2. 一个颜色连通块只绘制一次，完成后才进入下一个连通块');
+  // lines.push('# 3. 连通块内先建立 DFS 生成树，再执行“开放式 DFS”');
+  // lines.push('# 4. 最终路径上的树边只走一次，其余树边走两次');
+  // lines.push('# 5. 因此连通块移动步数从固定的 2(N-1) 降为 2(N-1)-D');
+  // lines.push('#    其中 D 是 DFS 生成树中入口到最深节点的深度');
+  // lines.push('# 6. 使用低可用度优先（Warnsdorff 风格）尝试多种方向顺序，尽量让 D 更大');
+  // lines.push('# 7. A 按下期间始终只在当前连通块内移动');
+  // lines.push('# 8. 连通块之间仍然 UP A 后再移动');
+  // lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
+  // lines.push('# ==========================================');
+  // lines.push('');
 
   lines.push('# ==========================================');
   lines.push('# Tomodachi Life 自动化绘制宏脚本');
   lines.push('#');
-  lines.push('# 路径优化策略：');
-  lines.push('# 1. 一次扫描整张图，建立每种颜色的 4 邻接连通块');
-  lines.push('# 2. 同一种颜色的连通块之间使用 Manhattan 距离贪心');
-  lines.push('# 3. 到达连通块后 DOWN A');
-  lines.push('# 4. 使用 DFS + 回溯遍历整个连通块');
-  lines.push('# 5. A 按下期间只在当前颜色连通块内部移动');
-  lines.push('# 6. 连通块之间 UP A 后再移动');
-  lines.push('# 7. 一个连通块只需要一次 DOWN A + 一次 UP A');
-  lines.push(
-    `# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`
-  );
+  lines.push('# DFS 路径优化策略：');
+  lines.push('# 1. 扫描各个颜色的所有连通块');
+  lines.push('# 2. 一次性将一种颜色的所有连通块绘制完成, 之后再绘制下一个颜色');
+  lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
   lines.push('# ==========================================');
   lines.push('');
 
   // ============================================================
   // 四方向
-  //
-  // DFS 使用固定的朴素方向优先级。
-  //
-  // RIGHT
-  // DOWN
-  // LEFT
-  // UP
   // ============================================================
 
   const directions = [
-    {
-      dx: 1,
-      dy: 0,
-      button: 'DPAD_RIGHT',
-    },
-    {
-      dx: 0,
-      dy: 1,
-      button: 'DPAD_DOWN',
-    },
-    {
-      dx: -1,
-      dy: 0,
-      button: 'DPAD_LEFT',
-    },
-    {
-      dx: 0,
-      dy: -1,
-      button: 'DPAD_UP',
-    },
-  ];
+    { dx: 1, dy: 0, button: 'DPAD_RIGHT' },
+    { dx: 0, dy: 1, button: 'DPAD_DOWN' },
+    { dx: -1, dy: 0, button: 'DPAD_LEFT' },
+    { dx: 0, dy: -1, button: 'DPAD_UP' },
+  ] as const;
 
   // ============================================================
   // 一次性建立整个图像的所有颜色连通块
-  //
-  // 注意：
-  // pIndices 中：
-  //   null       = 空白
-  //   0          = 脚本颜色 Index 1
-  //   1          = 脚本颜色 Index 2
-  //   ...
-  //
-  // componentsByColor 使用脚本颜色 Index：
-  //   1, 2, 3, ...
   // ============================================================
 
-  const buildAllColorComponents = (): Map<
-    number,
-    Component[]
-  > => {
-    const componentsByColor =
-      new Map<number, Component[]>();
-
-    // 0 = 未访问
-    // 1 = 已访问
-    const visited =
-      new Uint8Array(w * h);
+  const buildAllColorComponents = (): Map<number, Component[]> => {
+    const componentsByColor = new Map<number, Component[]>();
+    const visited = new Uint8Array(w * h);
 
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const pixelIdx =
-          pIndices[y]?.[x];
+        const pixelIdx = pIndices[y]?.[x];
 
-        // 空白像素跳过
-        if (
-          pixelIdx === undefined ||
-          pixelIdx === null
-        ) {
+        if (pixelIdx === undefined || pixelIdx === null) {
           continue;
         }
 
-        const startId =
-          getId(x, y);
-
+        const startId = getId(x, y);
         if (visited[startId]) {
           continue;
         }
 
-        const colorIndex =
-          pixelIdx + 1;
-
+        const colorIndex = pixelIdx + 1;
         const componentPixels: Point[] = [];
-
-        // ------------------------------------------------------
-        // 使用显式队列做 BFS，建立这个连通块
-        // ------------------------------------------------------
-
-        const queue: Point[] = [
-          { x, y },
-        ];
-
+        const queue: Point[] = [{ x, y }];
         visited[startId] = 1;
 
         let queueIndex = 0;
+        while (queueIndex < queue.length) {
+          const current = queue[queueIndex++];
+          componentPixels.push(current);
 
-        while (
-          queueIndex < queue.length
-        ) {
-          const current =
-            queue[queueIndex++];
+          for (const dir of directions) {
+            const nx = current.x + dir.dx;
+            const ny = current.y + dir.dy;
 
-          componentPixels.push(
-            current
-          );
-
-          for (
-            const dir
-            of directions
-          ) {
-            const nx =
-              current.x + dir.dx;
-
-            const ny =
-              current.y + dir.dy;
-
-            if (
-              nx < 0 ||
-              nx >= w ||
-              ny < 0 ||
-              ny >= h
-            ) {
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) {
               continue;
             }
 
-            const neighborId =
-              getId(nx, ny);
-
-            if (
-              visited[neighborId]
-            ) {
+            const neighborId = getId(nx, ny);
+            if (visited[neighborId]) {
               continue;
             }
 
-            const neighborColor =
-              pIndices[ny]?.[nx];
-
-            if (
-              neighborColor !==
-              pixelIdx
-            ) {
+            if (pIndices[ny]?.[nx] !== pixelIdx) {
               continue;
             }
 
             visited[neighborId] = 1;
-
-            queue.push({
-              x: nx,
-              y: ny,
-            });
+            queue.push({ x: nx, y: ny });
           }
         }
 
-        const component: Component = {
-          pixels: componentPixels,
-        };
-
-        const list =
-          componentsByColor.get(
-            colorIndex
-          );
+        const component: Component = { pixels: componentPixels };
+        const list = componentsByColor.get(colorIndex);
 
         if (list) {
           list.push(component);
         } else {
-          componentsByColor.set(
-            colorIndex,
-            [component]
-          );
+          componentsByColor.set(colorIndex, [component]);
         }
       }
     }
@@ -1315,56 +1225,28 @@ export const generateZigMacroScriptDFS = (
   };
 
   // ============================================================
-  // 找到：
-  //
-  // 当前光标 -> 某个 Component 中最近的像素
-  //
-  // 返回最近入口点以及距离。
+  // 找到当前光标 -> Component 中最近的像素
   // ============================================================
 
   const findNearestEntryPoint = (
     component: Component
-  ): {
-    point: Point;
-    distance: number;
-  } => {
-    let bestPoint =
-      component.pixels[0];
+  ): { point: Point; distance: number } => {
+    let bestPoint = component.pixels[0];
+    let bestDistance = manhattanDistance(
+      { x: context.curX, y: context.curY },
+      bestPoint
+    );
 
-    let bestDistance =
-      manhattanDistance(
-        {
-          x: context.curX,
-          y: context.curY,
-        },
-        bestPoint
+    for (let i = 1; i < component.pixels.length; i++) {
+      const point = component.pixels[i];
+      const distance = manhattanDistance(
+        { x: context.curX, y: context.curY },
+        point
       );
 
-    for (
-      let i = 1;
-      i < component.pixels.length;
-      i++
-    ) {
-      const point =
-        component.pixels[i];
-
-      const distance =
-        manhattanDistance(
-          {
-            x: context.curX,
-            y: context.curY,
-          },
-          point
-        );
-
-      if (
-        distance < bestDistance
-      ) {
-        bestDistance =
-          distance;
-
-        bestPoint =
-          point;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestPoint = point;
       }
     }
 
@@ -1375,390 +1257,469 @@ export const generateZigMacroScriptDFS = (
   };
 
   // ============================================================
-  // Component 内部：
+  // 为 Component 构建 DFS 生成树
   //
-  // DOWN A
-  // DFS
-  // UP A
+  // 关键优化：
+  // 旧版 DFS 在完成全部分支后，必须沿树边全部回到 root。
+  // 新版先建立树，再让“最深叶子”作为最终终点。
+  // 这样 root -> deepest 这条路径上的边只需要走一次。
   //
-  // 使用显式栈，而不是 JS 递归。
-  //
-  // DFS 的特点：
-  //
-  // 进入一个新的像素：
-  //     沿方向键移动一格
-  //
-  // 一个分支走到底：
-  //     沿原路返回
-  //
-  // 返回过程中仍然在同一个 Component 内，
-  // 所以不会串色。
-  //
-  // 最终：
-  //     光标回到 DFS 起点
+  // 同一个 Component 尝试多个 DFS 邻居优先级：
+  //   1. 低 onward-degree 优先（更容易形成长主路径）
+  //   2. 高 onward-degree 作为另一组候选
+  //   3. 四个方向分别轮换作为 tie-break
   // ============================================================
 
-  const drawComponentWithDFS = (
-    component: Component,
-    start: Point
-  ) => {
-    if (
-      component.pixels.length === 0
-    ) {
-      return;
+  const buildDfsTree = (
+    neighbors: number[][],
+    neighborDirs: number[][],
+    startLocal: number,
+    preferLowOnward: boolean,
+    directionOffset: number
+  ): DfsTree => {
+    const n = neighbors.length;
+
+    const parent = new Int32Array(n);
+    parent.fill(-2);
+
+    const depth = new Int32Array(n);
+    const visited = new Uint8Array(n);
+
+    visited[startLocal] = 1;
+    parent[startLocal] = -1;
+    depth[startLocal] = 0;
+
+    const stack: number[] = [startLocal];
+    let deepest = startLocal;
+
+    while (stack.length > 0) {
+      const current = stack[stack.length - 1];
+      const currentNeighbors = neighbors[current];
+      const currentDirs = neighborDirs[current];
+
+      let bestLocal = -1;
+      let bestOnward = preferLowOnward ? Infinity : -Infinity;
+      let bestDegree = Infinity;
+      let bestDirRank = Infinity;
+
+      for (let i = 0; i < currentNeighbors.length; i++) {
+        const neighbor = currentNeighbors[i];
+        if (visited[neighbor]) {
+          continue;
+        }
+
+        let onward = 0;
+        const nextNeighbors = neighbors[neighbor];
+
+        for (const next of nextNeighbors) {
+          if (!visited[next]) {
+            onward++;
+          }
+        }
+
+        const degree = nextNeighbors.length;
+        const dirRank =
+          (currentDirs[i] - directionOffset + directions.length) %
+          directions.length;
+
+        const betterOnward = preferLowOnward
+          ? onward < bestOnward
+          : onward > bestOnward;
+
+        const sameOnward = onward === bestOnward;
+        const betterDegree = sameOnward && degree < bestDegree;
+        const sameDegree = sameOnward && degree === bestDegree;
+        const betterDir = sameDegree && dirRank < bestDirRank;
+
+        if (
+          bestLocal < 0 ||
+          betterOnward ||
+          betterDegree ||
+          betterDir
+        ) {
+          bestLocal = neighbor;
+          bestOnward = onward;
+          bestDegree = degree;
+          bestDirRank = dirRank;
+        }
+      }
+
+      if (bestLocal < 0) {
+        stack.pop();
+        continue;
+      }
+
+      const next = bestLocal;
+      visited[next] = 1;
+      parent[next] = current;
+      depth[next] = depth[current] + 1;
+
+      if (depth[next] > depth[deepest]) {
+        deepest = next;
+      }
+
+      stack.push(next);
     }
 
-    // ----------------------------------------------------------
-    // 当前 Component 的所有像素集合
-    //
-    // 后续所有 A-held 移动都必须满足：
-    // 目标像素存在于这个 Set。
-    // ----------------------------------------------------------
+    // Component 已经在前面的 BFS 阶段确认连通，所以 DFS 树必须覆盖全部像素。
+    for (let i = 0; i < n; i++) {
+      if (!visited[i]) {
+        throw new Error(
+          `DFS tree incomplete: visited=${visited.reduce((sum, v) => sum + v, 0)}, expected=${n}`
+        );
+      }
+    }
 
-    const componentSet =
-      new Set<number>();
+    return {
+      parent,
+      depth,
+      deepest,
+    };
+  };
 
-    for (
-      const point
-      of component.pixels
-    ) {
-      componentSet.add(
-        getId(
-          point.x,
-          point.y
-        )
+  // ============================================================
+  // 在多个 DFS 树中选一个：
+  // 最大化 root -> deepest 的深度。
+  //
+  // 对宏执行时间而言：
+  // moves = 2 * (N - 1) - depth(deepest)
+  // 所以只要 depth 更大，宏移动次数就一定更少。
+  // ============================================================
+
+  const buildBestDfsTree = (
+    component: Component,
+    start: Point
+  ): { tree: DfsTree; startLocal: number } => {
+    const n = component.pixels.length;
+    const indexById = new Map<number, number>();
+
+    for (let i = 0; i < n; i++) {
+      const point = component.pixels[i];
+      indexById.set(getId(point.x, point.y), i);
+    }
+
+    const startLocal = indexById.get(getId(start.x, start.y));
+    if (startLocal === undefined) {
+      throw new Error(
+        `Invalid DFS start point: (${start.x},${start.y})`
       );
     }
 
-    // ----------------------------------------------------------
-    // DFS visited
-    // ----------------------------------------------------------
-
-    const visited =
-      new Set<number>();
-
-    visited.add(
-      getId(
-        start.x,
-        start.y
-      )
+    // 只建立一次 Component 邻接表；8 种 DFS 策略共享这份结构。
+    const neighbors: number[][] = Array.from(
+      { length: n },
+      () => []
+    );
+    const neighborDirs: number[][] = Array.from(
+      { length: n },
+      () => []
     );
 
+    for (let i = 0; i < n; i++) {
+      const point = component.pixels[i];
+
+      for (let dirIndex = 0; dirIndex < directions.length; dirIndex++) {
+        const dir = directions[dirIndex];
+        const nx = point.x + dir.dx;
+        const ny = point.y + dir.dy;
+
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) {
+          continue;
+        }
+
+        const neighborLocal = indexById.get(getId(nx, ny));
+        if (neighborLocal === undefined) {
+          continue;
+        }
+
+        neighbors[i].push(neighborLocal);
+        neighborDirs[i].push(dirIndex);
+      }
+    }
+
+    let bestTree: DfsTree | null = null;
+    let bestDepth = -1;
+
+    for (const preferLowOnward of [true, false]) {
+      for (let directionOffset = 0; directionOffset < directions.length; directionOffset++) {
+        const tree = buildDfsTree(
+          neighbors,
+          neighborDirs,
+          startLocal,
+          preferLowOnward,
+          directionOffset
+        );
+
+        const candidateDepth = tree.depth[tree.deepest];
+        if (candidateDepth > bestDepth) {
+          bestDepth = candidateDepth;
+          bestTree = tree;
+        }
+      }
+    }
+
+    if (!bestTree) {
+      throw new Error('Failed to build optimized DFS tree');
+    }
+
+    return {
+      tree: bestTree,
+      startLocal,
+    };
+  };
+
+  // ============================================================
+  // 用一个一步移动函数输出宏。
+  // 这里所有调用的两个节点都是同一 Component 内的相邻像素。
+  // ============================================================
+
+  const moveOnePoint = (from: Point, to: Point) => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+
+    if (dx === 1 && dy === 0) {
+      tap('DPAD_RIGHT');
+    } else if (dx === -1 && dy === 0) {
+      tap('DPAD_LEFT');
+    } else if (dx === 0 && dy === 1) {
+      tap('DPAD_DOWN');
+    } else if (dx === 0 && dy === -1) {
+      tap('DPAD_UP');
+    } else {
+      throw new Error(
+        `Invalid adjacent move: (${from.x},${from.y}) -> (${to.x},${to.y})`
+      );
+    }
+
+    context.curX = to.x;
+    context.curY = to.y;
+  };
+
+  // ============================================================
+  // 对一棵以 finalPath 为“主干”的树做开放式 DFS：
+  //
+  // 主干上的边：只走一次
+  // 非主干边：进入 + 返回，共两次
+  //
+  // 因此总移动数严格等于：
+  //   2(N-1) - |finalPath edges|
+  // ============================================================
+
+  const drawComponentWithOptimizedDFS = (
+    component: Component,
+    start: Point
+  ) => {
+    if (component.pixels.length === 0) {
+      return;
+    }
+
+    const { tree, startLocal } = buildBestDfsTree(
+      component,
+      start
+    );
+
+    const n = component.pixels.length;
+    const deepest = tree.deepest;
+
     // ----------------------------------------------------------
-    // DOWN A：
-    // 从这个 Component 的 start 开始绘制。
+    // 从 deepest 沿 parent 回到 start，得到最终只走一次的主干。
+    // ----------------------------------------------------------
+
+    const finalPath: number[] = [];
+    for (let current = deepest; current !== -1; current = tree.parent[current]) {
+      finalPath.push(current);
+    }
+    finalPath.reverse();
+
+    if (
+      finalPath.length === 0 ||
+      finalPath[0] !== startLocal ||
+      finalPath[finalPath.length - 1] !== deepest
+    ) {
+      throw new Error('Invalid optimized DFS final path');
+    }
+
+    const onFinalPath = new Uint8Array(n);
+    for (const local of finalPath) {
+      onFinalPath[local] = 1;
+    }
+
+    // ----------------------------------------------------------
+    // 用 firstChild / nextSibling 存储树，避免 children[][] 的大量对象。
+    // ----------------------------------------------------------
+
+    const firstChild = new Int32Array(n);
+    const nextSibling = new Int32Array(n);
+    firstChild.fill(-1);
+    nextSibling.fill(-1);
+
+    for (let local = 0; local < n; local++) {
+      const parent = tree.parent[local];
+      if (parent < 0) {
+        continue;
+      }
+
+      nextSibling[local] = firstChild[parent];
+      firstChild[parent] = local;
+    }
+
+    const moveLocal = (fromLocal: number, toLocal: number) => {
+      moveOnePoint(
+        component.pixels[fromLocal],
+        component.pixels[toLocal]
+      );
+    };
+
+    // ----------------------------------------------------------
+    // DFS 闭合遍历一个“非主干子树”。
+    //
+    // 进入 root 后，把整个子树走完，再返回 root 的 parent。
+    // 因为 root 不在 finalPath，这部分所有树边必须走两次。
+    // ----------------------------------------------------------
+
+    const walkClosedSubtree = (root: number) => {
+      const parentOfRoot = tree.parent[root];
+      if (parentOfRoot < 0) {
+        throw new Error('Closed subtree root cannot be the DFS root');
+      }
+
+      moveLocal(parentOfRoot, root);
+
+      const nodeStack: number[] = [root];
+      const childStack: number[] = [firstChild[root]];
+
+      while (nodeStack.length > 0) {
+        const top = nodeStack.length - 1;
+        const current = nodeStack[top];
+        const child = childStack[top];
+
+        if (child >= 0) {
+          childStack[top] = nextSibling[child];
+          moveLocal(current, child);
+          nodeStack.push(child);
+          childStack.push(firstChild[child]);
+          continue;
+        }
+
+        nodeStack.pop();
+        childStack.pop();
+
+        const parent = tree.parent[current];
+        if (parent < 0) {
+          throw new Error('Broken DFS tree during closed traversal');
+        }
+
+        moveLocal(current, parent);
+      }
+    };
+
+    // ----------------------------------------------------------
+    // DOWN A：开始绘制当前连通块。
     // ----------------------------------------------------------
 
     down('A');
 
     // ----------------------------------------------------------
-    // 显式 DFS 栈
-    //
-    // 栈顶元素：
-    // 当前所在像素 + 下一个准备尝试的方向
+    // 沿 finalPath 一直向前：
+    // 每到一个主干节点，先把挂在它上面的非主干子树全部闭合走完，
+    // 然后只用一步进入下一个主干节点。
     // ----------------------------------------------------------
 
-    const stack: DfsFrame[] = [
-      {
-        x: start.x,
-        y: start.y,
-        nextDir: 0,
-      },
-    ];
+    for (let pathIndex = 0; pathIndex < finalPath.length; pathIndex++) {
+      const current = finalPath[pathIndex];
 
-    while (
-      stack.length > 0
-    ) {
-      const frame =
-        stack[stack.length - 1];
-
-      let movedForward =
-        false;
-
-      // --------------------------------------------------------
-      // 尝试当前 frame 还没尝试过的方向
-      // --------------------------------------------------------
-
-      while (
-        frame.nextDir <
-        directions.length
+      for (
+        let child = firstChild[current];
+        child >= 0;
+        child = nextSibling[child]
       ) {
-        const dir =
-          directions[
-          frame.nextDir++
-          ];
-
-        const nx =
-          frame.x + dir.dx;
-
-        const ny =
-          frame.y + dir.dy;
-
-        // 边界
-        if (
-          nx < 0 ||
-          nx >= w ||
-          ny < 0 ||
-          ny >= h
-        ) {
+        if (onFinalPath[child]) {
           continue;
         }
 
-        const nextId =
-          getId(nx, ny);
-
-        // 不是这个 Component 的像素
-        if (
-          !componentSet.has(nextId)
-        ) {
-          continue;
-        }
-
-        // 已经访问过
-        if (
-          visited.has(nextId)
-        ) {
-          continue;
-        }
-
-        // ------------------------------------------------------
-        // 找到新的目标像素
-        //
-        // 此时 A 正在按下。
-        // 因为 nextId 属于当前 Component，
-        // 所以这是绝对安全的一步。
-        // ------------------------------------------------------
-
-        tap(dir.button);
-
-        context.curX = nx;
-        context.curY = ny;
-
-        visited.add(nextId);
-
-        stack.push({
-          x: nx,
-          y: ny,
-          nextDir: 0,
-        });
-
-        movedForward = true;
-
-        break;
+        walkClosedSubtree(child);
       }
 
-      if (movedForward) {
-        continue;
+      if (pathIndex + 1 < finalPath.length) {
+        moveLocal(current, finalPath[pathIndex + 1]);
       }
-
-      // --------------------------------------------------------
-      // 当前像素所有方向都探索完毕
-      //
-      // 开始 DFS 回溯。
-      // --------------------------------------------------------
-
-      stack.pop();
-
-      // 已经回到了根节点
-      if (
-        stack.length === 0
-      ) {
-        break;
-      }
-
-      const parent =
-        stack[stack.length - 1];
-
-      // --------------------------------------------------------
-      // 当前点 -> 父节点
-      //
-      // 两者一定相邻。
-      //
-      // 而且父节点显然属于同一个 Component，
-      // 所以 A 按着回去也是安全的。
-      // --------------------------------------------------------
-
-      const direction =
-        directionFromTo(
-          {
-            x: context.curX,
-            y: context.curY,
-          },
-          {
-            x: parent.x,
-            y: parent.y,
-          }
-        );
-
-      tap(direction);
-
-      context.curX = parent.x;
-      context.curY = parent.y;
     }
 
     // ----------------------------------------------------------
-    // 安全检查
-    //
-    // 如果 visited 数量 != component 像素数，
-    // 说明算法出现了 bug。
-    // 此时宁可停止生成，也不要生成漏像素的脚本。
+    // 安全检查：
+    // 一个 DFS 生成树共 N-1 条边，finalPath 有 D 条边只走一次，
+    // 其余边走两次，所以总移动应该精确等于 2(N-1)-D。
     // ----------------------------------------------------------
 
-    if (
-      visited.size !==
-      component.pixels.length
-    ) {
+    // tap 计数无法直接从 context 获取，因此只验证结构：
+    // 最深节点存在且 finalPath 覆盖 root -> deepest。
+    if (finalPath.length !== tree.depth[deepest] + 1) {
       up('A');
-
       throw new Error(
-        `Component DFS incomplete: ` +
-        `visited=${visited.size}, ` +
-        `expected=${component.pixels.length}, ` +
-        `start=(${start.x},${start.y})`
+        `Optimized DFS path mismatch: ` +
+        `path=${finalPath.length}, depth=${tree.depth[deepest]}`
       );
     }
 
-    // ----------------------------------------------------------
-    // 完成这个连通块
-    // ----------------------------------------------------------
-
     up('A');
 
-    // DFS 回溯结构保证：
-    // 当前光标最终回到 start。
-    context.curX = start.x;
-    context.curY = start.y;
+    context.curX = component.pixels[deepest].x;
+    context.curY = component.pixels[deepest].y;
+
   };
 
   // ============================================================
   // 绘制一种颜色的全部 Component
   //
-  // Component 之间：
-  //
-  // 当前光标
-  //      ↓
-  // 找最近 Component
-  //      ↓
-  // 找这个 Component 内最近入口点
-  //      ↓
-  // 移动过去（A 松开）
-  //      ↓
-  // DOWN A
-  //      ↓
-  // DFS 整个 Component
-  //      ↓
-  // UP A
-  //
-  // 重复。
+  // Component 之间一定 UP A 后移动。
+  // 仍然采用当前光标最近 Component 的贪心顺序，
+  // 但每个 Component 内部不再强制回到入口点。
   // ============================================================
 
   const drawColorComponents = (
     colorIndex: number,
     components: Component[]
   ) => {
-    if (
-      components.length === 0
-    ) {
+    if (components.length === 0) {
       return;
     }
 
     lines.push('');
-    lines.push(`# ==========================================`);
+    lines.push('# ==========================================');
     lines.push(`# 开始绘制颜色 ${colorIndex}`);
     lines.push(`# 连通块数量: ${components.length}`);
-    lines.push(`# ==========================================`);
+    lines.push('# ==========================================');
 
-    // ----------------------------------------------------------
-    // 用 Set 保存还没有绘制的 Component
-    // ----------------------------------------------------------
+    const remaining = new Set<Component>(components);
 
-    const remaining =
-      new Set<Component>(
-        components
-      );
+    while (remaining.size > 0) {
+      let bestComponent: Component | null = null;
+      let bestEntry: Point | null = null;
+      let bestDistance = Infinity;
 
-    let componentNumber = 0;
+      for (const component of remaining) {
+        const result = findNearestEntryPoint(component);
 
-    while (
-      remaining.size > 0
-    ) {
-      let bestComponent:
-        | Component
-        | null = null;
-
-      let bestEntry:
-        | Point
-        | null = null;
-
-      let bestDistance =
-        Infinity;
-
-      // --------------------------------------------------------
-      // 贪心：
-      // 当前光标 -> 所有剩余 Component
-      // 找 Manhattan 距离最小者。
-      // --------------------------------------------------------
-
-      for (
-        const component
-        of remaining
-      ) {
-        const result =
-          findNearestEntryPoint(
-            component
-          );
-
-        if (
-          result.distance <
-          bestDistance
-        ) {
-          bestDistance =
-            result.distance;
-
-          bestComponent =
-            component;
-
-          bestEntry =
-            result.point;
+        if (result.distance < bestDistance) {
+          bestDistance = result.distance;
+          bestComponent = component;
+          bestEntry = result.point;
         }
       }
 
-      if (
-        !bestComponent ||
-        !bestEntry
-      ) {
+      if (!bestComponent || !bestEntry) {
         throw new Error(
           `Failed to find next component for color ${colorIndex}`
         );
       }
 
-      componentNumber++;
-
-      // lines.push('');
-      // lines.push(`# Color ${colorIndex}: Component ${componentNumber}/${components.length}`);
-      // lines.push(`# Pixels: ${bestComponent.pixels.length}`);
-      // lines.push(`# Entry: (${bestEntry.x},${bestEntry.y})`);
-      // lines.push(`# Distance from cursor: ${bestDistance}`);
-
-      // --------------------------------------------------------
-      // A 必须是松开的：
-      // 在不同 Component 之间可以随便移动。
-      // --------------------------------------------------------
-
+      // A 必须保持 UP，连通块之间可以安全地自由移动。
       moveTo(bestEntry.x, bestEntry.y);
 
-      // --------------------------------------------------------
-      // A 按住，一笔 DFS 完成整个 Component
-      // --------------------------------------------------------
+      // 一个 Component：一次 DOWN A，所有像素完成后才 UP A。
+      drawComponentWithOptimizedDFS(bestComponent, bestEntry);
 
-      drawComponentWithDFS(
-        bestComponent,
-        bestEntry
-      );
-
-      remaining.delete(
-        bestComponent
-      );
+      remaining.delete(bestComponent);
     }
 
     lines.push(`# 颜色 ${colorIndex} 全部连通块绘制完成`);
@@ -1766,155 +1727,79 @@ export const generateZigMacroScriptDFS = (
 
   // ============================================================
   // 开始建立所有颜色的 Component
-  //
-  // 只扫描一次整张图片。
   // ============================================================
 
-  const componentsByColor =
-    buildAllColorComponents();
-
-  // ============================================================
-  // 开始
-  // ============================================================
+  const componentsByColor = buildAllColorComponents();
 
   initColorPanel();
 
-  const colorSize =
-    palette.length + 1;
+  const colorSize = palette.length + 1;
 
   // ============================================================
   // 按原来的 9 色一批处理
-  //
-  // colorIndex:
-  //   1, 2, 3, ...
-  //
-  // slot:
-  //   0, 1, 2, ...
   // ============================================================
 
   let colorBatchStart = 1;
 
-  while (
-    colorBatchStart < colorSize
-  ) {
-    const colorBatchEnd =
-      Math.min(
-        colorBatchStart + 8,
-        colorSize - 1
-      );
+  while (colorBatchStart < colorSize) {
+    const colorBatchEnd = Math.min(
+      colorBatchStart + 8,
+      colorSize - 1
+    );
 
     lines.push('');
-    lines.push(`# ==========================================`);
-    lines.push(`# 绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`);
-    lines.push(`# ==========================================`);
-
-    // ----------------------------------------------------------
-    // 找这个 Batch 中实际存在的颜色
-    // ----------------------------------------------------------
+    lines.push('# ==========================================');
+    lines.push(
+      `# 绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`
+    );
+    lines.push('# ==========================================');
 
     const presentColors: number[] = [];
 
     for (
-      let colorIndex =
-        colorBatchStart;
+      let colorIndex = colorBatchStart;
       colorIndex <= colorBatchEnd;
       colorIndex++
     ) {
-      const components =
-        componentsByColor.get(
-          colorIndex
-        );
+      const components = componentsByColor.get(colorIndex);
 
-      if (
-        components &&
-        components.length > 0
-      ) {
-        presentColors.push(
-          colorIndex
-        );
+      if (components && components.length > 0) {
+        presentColors.push(colorIndex);
       }
     }
 
-    // ----------------------------------------------------------
-    // 整个 Batch 都没有像素
-    // ----------------------------------------------------------
-
-    if (
-      presentColors.length === 0
-    ) {
+    if (presentColors.length === 0) {
       colorBatchStart += 9;
       continue;
     }
 
-    // ----------------------------------------------------------
-    // 只配置真正存在的颜色
-    //
-    // 不再无条件配置 9 个色槽。
-    // ----------------------------------------------------------
-
-    for (
-      const colorIndex
-      of presentColors
-    ) {
-      const slot =
-        colorIndex -
-        colorBatchStart;
-
-      chooseHSVColor(
-        slot,
-        colorIndex
-      );
+    // 只配置真正存在的颜色。
+    for (const colorIndex of presentColors) {
+      const slot = colorIndex - colorBatchStart;
+      chooseHSVColor(slot, colorIndex);
     }
 
-    // ----------------------------------------------------------
-    // 按颜色 Index 顺序绘制。
-    //
-    // 每个颜色内部，再对 Component 做贪心。
-    // ----------------------------------------------------------
+    // 保持原有颜色 Index 顺序，避免引入额外的颜色级别行为变化。
+    for (const colorIndex of presentColors) {
+      const components = componentsByColor.get(colorIndex);
 
-    for (
-      const colorIndex
-      of presentColors
-    ) {
-      const components =
-        componentsByColor.get(
-          colorIndex
-        );
-
-      if (
-        !components ||
-        components.length === 0
-      ) {
+      if (!components || components.length === 0) {
         continue;
       }
 
-      const slot =
-        colorIndex -
-        colorBatchStart;
-
-      chooseColorPanel(
-        slot
-      );
-
-      drawColorComponents(
-        colorIndex,
-        components
-      );
+      const slot = colorIndex - colorBatchStart;
+      chooseColorPanel(slot);
+      drawColorComponents(colorIndex, components);
     }
 
     colorBatchStart += 9;
   }
 
-  // ============================================================
-  // 全部绘制完成
-  // ============================================================
-
   lines.push('');
-  lines.push(`# ==========================================`);
-  lines.push(`# 全图绘制完成，复位光标至 (0,0)`);
-  lines.push(`# ==========================================`);
+  lines.push('# ==========================================');
+  lines.push('# 全图绘制完成，复位光标至 (0,0)');
+  lines.push('# ==========================================');
 
-  // 此时 A 已经保证是 UP 状态
   moveTo(0, 0);
 
   return lines.join('\n');

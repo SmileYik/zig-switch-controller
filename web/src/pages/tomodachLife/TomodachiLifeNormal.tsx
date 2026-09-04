@@ -5,6 +5,7 @@ import { MacroAlgorithmMap, type MacroAlgorithm, type MacroAlgorithmType } from 
 import { generateZigByteArray, loadImageFromZigByteArray } from './image';
 import ColorPickerModal from './ColorPickerModal';
 import ImageEditorModal from './ImageEditorModal';
+import { type QuantizeAlgorithm, QuantizeAlgorithmMap, type QuantizeType } from './quantizeAlgorithm';
 
 interface TomodachiLifeNormalProps {
   onChangeScript: (value: string) => void;
@@ -50,78 +51,15 @@ function TomodachiLifeNormal({
       if (k === value) alg = v;
     });
     setMacroAlgorithm(alg);
-  }
+  };
 
-  const quantizePixels = (rawPixels: PixelData[][], k: number, w: number, h: number) => {
-    const validPixels: RGBColor[] = [];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (rawPixels[y][x]) validPixels.push(rawPixels[y][x]!);
-      }
-    }
-
-    const emptyIndices: (number | null)[][] = Array.from({ length: h }, () => Array(w).fill(null));
-    const emptyQuantizedData: PixelData[][] = Array.from({ length: h }, () => Array(w).fill(null));
-
-    if (validPixels.length === 0) {
-      return { palette: [], pixelIndices: emptyIndices, quantizedData: emptyQuantizedData };
-    }
-
-    let centroids: RGBColor[] = [];
-    const step = Math.floor(validPixels.length / k);
-    for (let i = 0; i < k; i++) {
-      centroids.push({ ...validPixels[Math.min(i * step, validPixels.length - 1)] });
-    }
-
-    for (let iter = 0; iter < 8; iter++) {
-      const clusters: RGBColor[][] = Array.from({ length: k }, () => []);
-      for (const p of validPixels) {
-        let minDist = Infinity;
-        let bestIdx = 0;
-        centroids.forEach((c, idx) => {
-          const dist = (p.r - c.r) ** 2 + (p.g - c.g) ** 2 + (p.b - c.b) ** 2;
-          if (dist < minDist) {
-            minDist = dist;
-            bestIdx = idx;
-          }
-        });
-        clusters[bestIdx].push(p);
-      }
-
-      centroids = clusters.map((group, idx) => {
-        if (group.length === 0) return centroids[idx];
-        const sum = group.reduce((acc, curr) => ({ r: acc.r + curr.r, g: acc.g + curr.g, b: acc.b + curr.b }), { r: 0, g: 0, b: 0 });
-        return {
-          r: Math.round(sum.r / group.length),
-          g: Math.round(sum.g / group.length),
-          b: Math.round(sum.b / group.length),
-        };
-      });
-    }
-
-    const pixelIndicesResult: (number | null)[][] = Array.from({ length: h }, () => Array(w).fill(null));
-    const quantizedData: PixelData[][] = Array.from({ length: h }, () => Array(w).fill(null));
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const p = rawPixels[y][x];
-        if (p) {
-          let minDist = Infinity;
-          let bestIdx = 0;
-          centroids.forEach((c, idx) => {
-            const dist = (p.r - c.r) ** 2 + (p.g - c.g) ** 2 + (p.b - c.b) ** 2;
-            if (dist < minDist) {
-              minDist = dist;
-              bestIdx = idx;
-            }
-          });
-          pixelIndicesResult[y][x] = bestIdx;
-          quantizedData[y][x] = centroids[bestIdx];
-        }
-      }
-    }
-
-    return { palette: centroids, pixelIndices: pixelIndicesResult, quantizedData };
+  const [quantizeAlgorithm, setQuantizeAlgorithm] = useState<QuantizeAlgorithm>(QuantizeAlgorithmMap.normal);
+  const onSetQuantizeAlgorithm = (value: string) => {
+    let alg = QuantizeAlgorithmMap.normal;
+    Object.entries(QuantizeAlgorithmMap).forEach(([k, v]) => {
+      if (k === value) alg = v;
+    });
+    setQuantizeAlgorithm(alg);
   };
 
   const updateRenderOutput = (pIndices: (number | null)[][], palette: RGBColor[]) => {
@@ -287,7 +225,7 @@ function TomodachiLifeNormal({
         rawPixels.push(row);
       }
 
-      const { palette, pixelIndices: pIndices } = quantizePixels(rawPixels, colorCount, cropWidth, cropHeight);
+      const { palette, pixelIndices: pIndices } = quantizeAlgorithm.quantize(rawPixels, colorCount, cropWidth, cropHeight);
 
       setPixelIndices(pIndices);
       setOriginalPalette(palette);
@@ -392,6 +330,34 @@ function TomodachiLifeNormal({
             <div className="m3-card">
               <div className="m3-controls-bar">
                 <label className="m3-input-field">
+                  量化:
+                  <select
+                    value={quantizeAlgorithm.type}
+                    onChange={(e) => onSetQuantizeAlgorithm(e.target.value)}
+                    className="m3-input"
+                    style={{ width: '100px' }}
+                  >
+                    {(Object.keys(QuantizeAlgorithmMap) as QuantizeType[]).map(e => (
+                      <option value={e}>{e}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="m3-input-field">
+                  色彩数:
+                  <input
+                    type="number"
+                    min="2"
+                    max="256"
+                    value={colorCount}
+                    onChange={(e) => setColorCount(Math.min(256, Math.max(2, parseInt(e.target.value) || 2)))}
+                    className="m3-input"
+                    style={{ width: '100px' }}
+                  />
+                </label>
+              </div>
+              <div className="m3-controls-bar">
+                <label className="m3-input-field">
                   宽度:
                   <input
                     type="number"
@@ -442,20 +408,8 @@ function TomodachiLifeNormal({
                     style={{ width: '100px' }}
                   />
                 </label>
-
-                <label className="m3-input-field">
-                  色彩数:
-                  <input
-                    type="number"
-                    min="2"
-                    max="256"
-                    value={colorCount}
-                    onChange={(e) => setColorCount(Math.min(256, Math.max(2, parseInt(e.target.value) || 2)))}
-                    className="m3-input"
-                    style={{ width: '100px' }}
-                  />
-                </label>
-
+              </div>
+              <div className="m3-controls-bar">
                 <label className="m3-input-field">
                   缩放:
                   <input
@@ -467,7 +421,8 @@ function TomodachiLifeNormal({
                     onChange={(e) => updateScaleWithCenter(parseFloat(e.target.value))}
                   />
                 </label>
-
+              </div>
+              <div className="m3-controls-bar">
                 <button
                   className="m3-btn m3-btn-filled"
                   onClick={handleApplyCropAndGenerate}
@@ -476,7 +431,6 @@ function TomodachiLifeNormal({
                   {isProcessing ? '生成中...' : '确认裁剪并生成数据与脚本'}
                 </button>
               </div>
-
               <div
                 className="m3-viewport-container"
                 style={{

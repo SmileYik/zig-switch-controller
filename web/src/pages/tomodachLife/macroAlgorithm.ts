@@ -1,5 +1,219 @@
 import { rgbToTomodachiHSV, type RGBColor } from "./color";
 
+export type MacroGenerator = (
+  w: number,
+  h: number,
+  palette: RGBColor[],
+  pIndices: (number | null)[][],
+  delay: number
+) => string;
+
+type Point = {
+  x: number;
+  y: number;
+};
+
+export interface ZigMacroScriptContext {
+  readonly w: number;
+  readonly h: number;
+  readonly palette: RGBColor[];
+  readonly pIndices: (number | null)[][];
+  readonly delay: number;
+
+  readonly lines: string[];
+
+  curX: number;
+  curY: number;
+  curColorPanelIdx: number;
+
+  tap(button: string, space?: number): void;
+  tapMultiple(button: string, count: number): void;
+  wait(ms: number): void;
+  down(button: string): void;
+  up(button: string): void;
+
+  initColorPanel(): void;
+  chooseColorPanel(idx: number): void;
+  resetHSVColorPanel(): void;
+  chooseHSVColor(slotIdx: number, colorIdx: number): void;
+
+  moveTo(targetX: number, targetY: number): void;
+  getId(x: number, y: number): number;
+  manhattanDistance(a: Point, b: Point): number;
+  directionFromTo(from: Point, to: Point): string;
+}
+
+const createZigMacroScriptContext = (
+  w: number,
+  h: number,
+  palette: RGBColor[],
+  pIndices: (number | null)[][],
+  delay: number
+): ZigMacroScriptContext => {
+  const context: ZigMacroScriptContext = {
+    w,
+    h,
+    palette,
+    pIndices,
+    delay,
+    lines: [],
+    curX: 0,
+    curY: 0,
+    curColorPanelIdx: 0,
+
+    tap: (button, space = 0) => context.lines.push(`${' '.repeat(space)}TAP ${delay}ms ${delay}ms ${button}`),
+
+    tapMultiple: (button, count) => {
+      if (count <= 0) return;
+      if (count === 1) {
+        context.tap(button);
+        return;
+      }
+
+      context.lines.push(`REPEAT ${count}`);
+      context.tap(button, 2);
+      context.lines.push('END');
+    },
+
+    wait: (ms) => context.lines.push(`WAIT ${ms}ms`),
+
+    down: (button) => {
+      context.lines.push(`DOWN ${button}`);
+      context.wait(delay);
+    },
+
+    up: (button) => {
+      context.lines.push(`UP ${button}`);
+      context.wait(delay);
+    },
+
+    initColorPanel: () => {
+      context.lines.push('# --- 初始化调色板面板 ---');
+
+      context.tap('Y');
+      context.tapMultiple('DPAD_DOWN', 10);
+      context.tapMultiple('DPAD_UP', 8);
+      context.tap('Y');
+      context.tap('R');
+      context.tap('R');
+      context.tap('R');
+      context.wait(100);
+      context.tap('A');
+
+      context.curColorPanelIdx = 0;
+    },
+
+    chooseColorPanel: (idx) => {
+      if (context.curColorPanelIdx === idx) {
+        return;
+      }
+
+      context.tap('Y');
+
+      if (idx > context.curColorPanelIdx) {
+        context.tapMultiple('DPAD_DOWN', idx - context.curColorPanelIdx);
+      } else {
+        context.tapMultiple('DPAD_UP', context.curColorPanelIdx - idx);
+      }
+
+      context.curColorPanelIdx = idx;
+      context.tap('A');
+    },
+
+    resetHSVColorPanel: () => {
+      context.lines.push('# --- 复位 HSV 调色板 ---');
+
+      context.wait(100);
+      context.lines.push('STICK LEFT_STICK -100 +100');
+      context.wait(100);
+      context.lines.push('DOWN ZL');
+      context.wait(5000);
+      context.lines.push('UP ZL');
+      context.wait(100);
+      context.lines.push('RESET_STICK LEFT_STICK');
+      context.wait(100);
+    },
+
+    chooseHSVColor: (slotIdx, colorIdx) => {
+      const color = context.palette[colorIdx - 1];
+
+      if (!color) {
+        return;
+      }
+
+      const hsv = rgbToTomodachiHSV(
+        color.r,
+        color.g,
+        color.b
+      );
+
+      context.lines.push(
+        `\n# 配置色槽 Slot ${slotIdx} <- ` +
+        `调色板颜色 ${colorIdx}: ` +
+        `RGB(${color.r},${color.g},${color.b})`
+      );
+
+      context.wait(100);
+      context.chooseColorPanel(slotIdx);
+      context.wait(100);
+      context.tap('Y');
+      context.wait(100);
+      context.tap('Y');
+      context.wait(100);
+      context.resetHSVColorPanel();
+      context.wait(100);
+      context.tapMultiple('ZR', hsv.hTicks);
+      context.wait(100);
+      context.tapMultiple('DPAD_RIGHT', hsv.sTicks);
+      context.wait(100);
+      context.tapMultiple('DPAD_DOWN', hsv.vTicks);
+      context.wait(100);
+      context.tap('A');
+      context.wait(100);
+    },
+
+    moveTo: (targetX, targetY) => {
+      const dx = targetX - context.curX;
+      const dy = targetY - context.curY;
+
+      if (dx > 0) {
+        context.tapMultiple('DPAD_RIGHT', dx);
+      } else if (dx < 0) {
+        context.tapMultiple('DPAD_LEFT', -dx);
+      }
+
+      if (dy > 0) {
+        context.tapMultiple('DPAD_DOWN', dy);
+      } else if (dy < 0) {
+        context.tapMultiple('DPAD_UP', -dy);
+      }
+
+      context.curX = targetX;
+      context.curY = targetY;
+    },
+
+    getId: (x, y) => y * w + x,
+
+    manhattanDistance: (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y),
+
+    directionFromTo: (from, to) => {
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+
+      if (dx === 1 && dy === 0) return 'DPAD_RIGHT';
+      if (dx === -1 && dy === 0) return 'DPAD_LEFT';
+      if (dx === 0 && dy === 1) return 'DPAD_DOWN';
+      if (dx === 0 && dy === -1) return 'DPAD_UP';
+
+      throw new Error(
+        `Invalid adjacent move: (${from.x},${from.y}) -> (${to.x},${to.y})`
+      );
+    },
+  };
+
+  return context;
+};
+
 export const generateZigMacroScriptBySegment = (
   w: number,
   h: number,
@@ -7,11 +221,6 @@ export const generateZigMacroScriptBySegment = (
   pIndices: (number | null)[][],
   delay: number
 ): string => {
-  type Point = {
-    x: number;
-    y: number;
-  };
-
   type Segment = {
     a: Point;
     b: Point;
@@ -22,7 +231,25 @@ export const generateZigMacroScriptBySegment = (
     segments: Segment[];
   };
 
-  const lines: string[] = [];
+  const context = createZigMacroScriptContext(w, h, palette, pIndices, delay);
+
+  const {
+    lines,
+    tap,
+    tapMultiple,
+    down,
+    up,
+    initColorPanel,
+    chooseColorPanel,
+    chooseHSVColor,
+    moveTo,
+    directionFromTo,
+    manhattanDistance,
+    getId,
+  } = context;
+
+  const cellId = getId;
+  const manhattan = manhattanDistance;
 
   lines.push('# ==========================================');
   lines.push('# Tomodachi Life 自动化绘制宏脚本');
@@ -34,213 +261,6 @@ export const generateZigMacroScriptBySegment = (
   lines.push('# 5. 相邻线段尽量保持 A 按下状态连续绘制');
   lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
   lines.push('# ==========================================\n');
-
-  let curColorPanelIdx = 0;
-
-  // ------------------------------------------------------------
-  // 基础宏
-  // ------------------------------------------------------------
-
-  const tap = (button: string, space: number = 0) => lines.push(`${' '.repeat(space)}TAP ${delay}ms ${delay}ms ${button}`);
-
-  const tapMultiple = (button: string, count: number) => {
-    if (count <= 0) return;
-
-    if (count === 1) {
-      tap(button);
-      return;
-    }
-
-    lines.push(`REPEAT ${count}`);
-    tap(button, 2);
-    lines.push('END');
-  };
-
-  const wait = (ms: number) => lines.push(`WAIT ${ms}ms`);
-
-  const down = (button: string) => {
-    lines.push(`DOWN ${button}`);
-    wait(delay);
-  };
-
-  const up = (button: string) => {
-    lines.push(`UP ${button}`);
-    wait(delay);
-  };
-
-  // ------------------------------------------------------------
-  // 调色板
-  // ------------------------------------------------------------
-
-  const initColorPanel = () => {
-    lines.push('# --- 初始化调色板面板 ---');
-
-    tap('Y');
-
-    tapMultiple('DPAD_DOWN', 10);
-    tapMultiple('DPAD_UP', 8);
-
-    tap('Y');
-
-    tap('R');
-    tap('R');
-    tap('R');
-
-    wait(100);
-
-    tap('A');
-
-    curColorPanelIdx = 0;
-  };
-
-  const chooseColorPanel = (idx: number) => {
-    if (curColorPanelIdx === idx) {
-      return;
-    }
-
-    tap('Y');
-
-    if (idx > curColorPanelIdx) {
-      tapMultiple('DPAD_DOWN', idx - curColorPanelIdx);
-    } else {
-      tapMultiple('DPAD_UP', curColorPanelIdx - idx);
-    }
-
-    curColorPanelIdx = idx;
-
-    tap('A');
-  };
-
-  const resetHSVColorPanel = () => {
-    lines.push('# --- 复位 HSV 调色板 ---');
-
-    wait(100);
-
-    lines.push('STICK LEFT_STICK -100 +100');
-    wait(100);
-
-    lines.push('DOWN ZL');
-    wait(5000);
-
-    lines.push('UP ZL');
-    wait(100);
-
-    lines.push('RESET_STICK LEFT_STICK');
-    wait(100);
-  };
-
-  const chooseHSVColor = (
-    slotIdx: number,
-    colorIdx: number
-  ) => {
-    const color = palette[colorIdx - 1];
-
-    if (!color) {
-      return;
-    }
-
-    const hsv = rgbToTomodachiHSV(
-      color.r,
-      color.g,
-      color.b
-    );
-
-    lines.push(
-      `\n# 配置色槽 Slot ${slotIdx} <- 调色板颜色 ${colorIdx}: ` +
-      `RGB(${color.r},${color.g},${color.b})`
-    );
-
-    wait(100);
-
-    chooseColorPanel(slotIdx);
-
-    wait(100);
-
-    tap('Y');
-    wait(100);
-
-    tap('Y');
-    wait(100);
-
-    resetHSVColorPanel();
-
-    wait(100);
-
-    tapMultiple('ZR', hsv.hTicks);
-
-    wait(100);
-
-    tapMultiple('DPAD_RIGHT', hsv.sTicks);
-
-    wait(100);
-
-    tapMultiple('DPAD_DOWN', hsv.vTicks);
-
-    wait(100);
-
-    tap('A');
-
-    wait(100);
-  };
-
-  // ------------------------------------------------------------
-  // 光标移动
-  // ------------------------------------------------------------
-
-  let curX = 0;
-  let curY = 0;
-
-  const moveTo = (
-    targetX: number,
-    targetY: number
-  ) => {
-    const dx = targetX - curX;
-    const dy = targetY - curY;
-
-    if (dx > 0) {
-      tapMultiple('DPAD_RIGHT', dx);
-    } else if (dx < 0) {
-      tapMultiple('DPAD_LEFT', -dx);
-    }
-
-    if (dy > 0) {
-      tapMultiple('DPAD_DOWN', dy);
-    } else if (dy < 0) {
-      tapMultiple('DPAD_UP', -dy);
-    }
-
-    curX = targetX;
-    curY = targetY;
-  };
-
-  const cellId = (x: number, y: number) => {
-    return y * w + x;
-  };
-
-  const manhattan = (
-    a: Point,
-    b: Point
-  ) => {
-    return Math.abs(a.x - b.x) +
-      Math.abs(a.y - b.y);
-  };
-
-  const directionFromTo = (
-    from: Point,
-    to: Point
-  ): string => {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-
-    if (dx === 1 && dy === 0) return 'DPAD_RIGHT';
-    if (dx === -1 && dy === 0) return 'DPAD_LEFT';
-    if (dx === 0 && dy === 1) return 'DPAD_DOWN';
-    if (dx === 0 && dy === -1) return 'DPAD_UP';
-
-    throw new Error(
-      `Invalid adjacent move: (${from.x},${from.y}) -> (${to.x},${to.y})`
-    );
-  };
 
   // ------------------------------------------------------------
   // 根据一组像素生成最大水平/垂直连续线段
@@ -494,8 +514,8 @@ export const generateZigMacroScriptBySegment = (
 
     // 单点线段，不需要移动
     if (dx === 0 && dy === 0) {
-      curX = end.x;
-      curY = end.y;
+      context.curX = end.x;
+      context.curY = end.y;
       return;
     }
 
@@ -523,8 +543,8 @@ export const generateZigMacroScriptBySegment = (
       );
     }
 
-    curX = end.x;
-    curY = end.y;
+    context.curX = end.x;
+    context.curY = end.y;
   };
 
   // ------------------------------------------------------------
@@ -536,8 +556,8 @@ export const generateZigMacroScriptBySegment = (
     target: Point
   ) => {
     const current: Point = {
-      x: curX,
-      y: curY,
+      x: context.curX,
+      y: context.curY,
     };
 
     if (
@@ -545,7 +565,7 @@ export const generateZigMacroScriptBySegment = (
     ) {
       throw new Error(
         `moveHeldOneStep requires adjacent point: ` +
-        `(${curX},${curY}) -> (${target.x},${target.y})`
+        `(${context.curX},${context.curY}) -> (${target.x},${target.y})`
       );
     }
 
@@ -556,8 +576,8 @@ export const generateZigMacroScriptBySegment = (
 
     tap(direction);
 
-    curX = target.x;
-    curY = target.y;
+    context.curX = target.x;
+    context.curY = target.y;
   };
 
   // ------------------------------------------------------------
@@ -628,8 +648,8 @@ export const generateZigMacroScriptBySegment = (
       ] as const;
 
       for (const [dx, dy] of dirs) {
-        const nx = curX + dx;
-        const ny = curY + dy;
+        const nx = context.curX + dx;
+        const ny = context.curY + dy;
 
         if (
           nx < 0 ||
@@ -708,7 +728,7 @@ export const generateZigMacroScriptBySegment = (
 
         const distA =
           manhattan(
-            { x: curX, y: curY },
+            { x: context.curX, y: context.curY },
             seg.a
           );
 
@@ -745,8 +765,8 @@ export const generateZigMacroScriptBySegment = (
         const nearest =
           findNearestSegment(
             segments,
-            curX,
-            curY,
+            context.curX,
+            context.curY,
             used
           );
 
@@ -764,8 +784,8 @@ export const generateZigMacroScriptBySegment = (
       const nearest =
         findNearestSegment(
           segments,
-          curX,
-          curY,
+          context.curX,
+          context.curY,
           used
         );
 
@@ -793,11 +813,11 @@ export const generateZigMacroScriptBySegment = (
         best = Math.min(
           best,
           manhattan(
-            { x: curX, y: curY },
+            { x: context.curX, y: context.curY },
             seg.a
           ),
           manhattan(
-            { x: curX, y: curY },
+            { x: context.curX, y: context.curY },
             seg.b
           )
         );
@@ -847,11 +867,11 @@ export const generateZigMacroScriptBySegment = (
           distance = Math.min(
             distance,
             manhattan(
-              { x: curX, y: curY },
+              { x: context.curX, y: context.curY },
               seg.a
             ),
             manhattan(
-              { x: curX, y: curY },
+              { x: context.curX, y: context.curY },
               seg.b
             )
           );
@@ -1031,9 +1051,9 @@ export const generateZigMacroScriptBySegment = (
         colorBatchStart;
 
       lines.push(`
-  # ==========================================
-  # 绘制颜色 ${bestColor} (Slot ${slot})
-  # ==========================================`
+# ==========================================
+# 绘制颜色 ${bestColor} (Slot ${slot})
+# ==========================================`
       );
 
       // 只在真正切换颜色时调用
@@ -1065,4 +1085,847 @@ export const generateZigMacroScriptBySegment = (
   moveTo(0, 0);
 
   return lines.join('\n');
+};
+
+export const generateZigMacroScriptDFS = (
+  w: number,
+  h: number,
+  palette: RGBColor[],
+  pIndices: (number | null)[][],
+  delay: number
+): string => {
+  type Component = {
+    pixels: Point[];
+  };
+
+  type DfsFrame = {
+    x: number;
+    y: number;
+    nextDir: number;
+  };
+
+  const context = createZigMacroScriptContext(w, h, palette, pIndices, delay);
+
+  const {
+    lines,
+    tap,
+    down,
+    up,
+    initColorPanel,
+    chooseColorPanel,
+    chooseHSVColor,
+    moveTo,
+    getId,
+    directionFromTo,
+    manhattanDistance,
+  } = context;
+
+  lines.push('# ==========================================');
+  lines.push('# Tomodachi Life 自动化绘制宏脚本');
+  lines.push('#');
+  lines.push('# 路径优化策略：');
+  lines.push('# 1. 一次扫描整张图，建立每种颜色的 4 邻接连通块');
+  lines.push('# 2. 同一种颜色的连通块之间使用 Manhattan 距离贪心');
+  lines.push('# 3. 到达连通块后 DOWN A');
+  lines.push('# 4. 使用 DFS + 回溯遍历整个连通块');
+  lines.push('# 5. A 按下期间只在当前颜色连通块内部移动');
+  lines.push('# 6. 连通块之间 UP A 后再移动');
+  lines.push('# 7. 一个连通块只需要一次 DOWN A + 一次 UP A');
+  lines.push(
+    `# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`
+  );
+  lines.push('# ==========================================');
+  lines.push('');
+
+  // ============================================================
+  // 四方向
+  //
+  // DFS 使用固定的朴素方向优先级。
+  //
+  // RIGHT
+  // DOWN
+  // LEFT
+  // UP
+  // ============================================================
+
+  const directions = [
+    {
+      dx: 1,
+      dy: 0,
+      button: 'DPAD_RIGHT',
+    },
+    {
+      dx: 0,
+      dy: 1,
+      button: 'DPAD_DOWN',
+    },
+    {
+      dx: -1,
+      dy: 0,
+      button: 'DPAD_LEFT',
+    },
+    {
+      dx: 0,
+      dy: -1,
+      button: 'DPAD_UP',
+    },
+  ];
+
+  // ============================================================
+  // 一次性建立整个图像的所有颜色连通块
+  //
+  // 注意：
+  // pIndices 中：
+  //   null       = 空白
+  //   0          = 脚本颜色 Index 1
+  //   1          = 脚本颜色 Index 2
+  //   ...
+  //
+  // componentsByColor 使用脚本颜色 Index：
+  //   1, 2, 3, ...
+  // ============================================================
+
+  const buildAllColorComponents = (): Map<
+    number,
+    Component[]
+  > => {
+    const componentsByColor =
+      new Map<number, Component[]>();
+
+    // 0 = 未访问
+    // 1 = 已访问
+    const visited =
+      new Uint8Array(w * h);
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const pixelIdx =
+          pIndices[y]?.[x];
+
+        // 空白像素跳过
+        if (
+          pixelIdx === undefined ||
+          pixelIdx === null
+        ) {
+          continue;
+        }
+
+        const startId =
+          getId(x, y);
+
+        if (visited[startId]) {
+          continue;
+        }
+
+        const colorIndex =
+          pixelIdx + 1;
+
+        const componentPixels: Point[] = [];
+
+        // ------------------------------------------------------
+        // 使用显式队列做 BFS，建立这个连通块
+        // ------------------------------------------------------
+
+        const queue: Point[] = [
+          { x, y },
+        ];
+
+        visited[startId] = 1;
+
+        let queueIndex = 0;
+
+        while (
+          queueIndex < queue.length
+        ) {
+          const current =
+            queue[queueIndex++];
+
+          componentPixels.push(
+            current
+          );
+
+          for (
+            const dir
+            of directions
+          ) {
+            const nx =
+              current.x + dir.dx;
+
+            const ny =
+              current.y + dir.dy;
+
+            if (
+              nx < 0 ||
+              nx >= w ||
+              ny < 0 ||
+              ny >= h
+            ) {
+              continue;
+            }
+
+            const neighborId =
+              getId(nx, ny);
+
+            if (
+              visited[neighborId]
+            ) {
+              continue;
+            }
+
+            const neighborColor =
+              pIndices[ny]?.[nx];
+
+            if (
+              neighborColor !==
+              pixelIdx
+            ) {
+              continue;
+            }
+
+            visited[neighborId] = 1;
+
+            queue.push({
+              x: nx,
+              y: ny,
+            });
+          }
+        }
+
+        const component: Component = {
+          pixels: componentPixels,
+        };
+
+        const list =
+          componentsByColor.get(
+            colorIndex
+          );
+
+        if (list) {
+          list.push(component);
+        } else {
+          componentsByColor.set(
+            colorIndex,
+            [component]
+          );
+        }
+      }
+    }
+
+    return componentsByColor;
+  };
+
+  // ============================================================
+  // 找到：
+  //
+  // 当前光标 -> 某个 Component 中最近的像素
+  //
+  // 返回最近入口点以及距离。
+  // ============================================================
+
+  const findNearestEntryPoint = (
+    component: Component
+  ): {
+    point: Point;
+    distance: number;
+  } => {
+    let bestPoint =
+      component.pixels[0];
+
+    let bestDistance =
+      manhattanDistance(
+        {
+          x: context.curX,
+          y: context.curY,
+        },
+        bestPoint
+      );
+
+    for (
+      let i = 1;
+      i < component.pixels.length;
+      i++
+    ) {
+      const point =
+        component.pixels[i];
+
+      const distance =
+        manhattanDistance(
+          {
+            x: context.curX,
+            y: context.curY,
+          },
+          point
+        );
+
+      if (
+        distance < bestDistance
+      ) {
+        bestDistance =
+          distance;
+
+        bestPoint =
+          point;
+      }
+    }
+
+    return {
+      point: bestPoint,
+      distance: bestDistance,
+    };
+  };
+
+  // ============================================================
+  // Component 内部：
+  //
+  // DOWN A
+  // DFS
+  // UP A
+  //
+  // 使用显式栈，而不是 JS 递归。
+  //
+  // DFS 的特点：
+  //
+  // 进入一个新的像素：
+  //     沿方向键移动一格
+  //
+  // 一个分支走到底：
+  //     沿原路返回
+  //
+  // 返回过程中仍然在同一个 Component 内，
+  // 所以不会串色。
+  //
+  // 最终：
+  //     光标回到 DFS 起点
+  // ============================================================
+
+  const drawComponentWithDFS = (
+    component: Component,
+    start: Point
+  ) => {
+    if (
+      component.pixels.length === 0
+    ) {
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // 当前 Component 的所有像素集合
+    //
+    // 后续所有 A-held 移动都必须满足：
+    // 目标像素存在于这个 Set。
+    // ----------------------------------------------------------
+
+    const componentSet =
+      new Set<number>();
+
+    for (
+      const point
+      of component.pixels
+    ) {
+      componentSet.add(
+        getId(
+          point.x,
+          point.y
+        )
+      );
+    }
+
+    // ----------------------------------------------------------
+    // DFS visited
+    // ----------------------------------------------------------
+
+    const visited =
+      new Set<number>();
+
+    visited.add(
+      getId(
+        start.x,
+        start.y
+      )
+    );
+
+    // ----------------------------------------------------------
+    // DOWN A：
+    // 从这个 Component 的 start 开始绘制。
+    // ----------------------------------------------------------
+
+    down('A');
+
+    // ----------------------------------------------------------
+    // 显式 DFS 栈
+    //
+    // 栈顶元素：
+    // 当前所在像素 + 下一个准备尝试的方向
+    // ----------------------------------------------------------
+
+    const stack: DfsFrame[] = [
+      {
+        x: start.x,
+        y: start.y,
+        nextDir: 0,
+      },
+    ];
+
+    while (
+      stack.length > 0
+    ) {
+      const frame =
+        stack[stack.length - 1];
+
+      let movedForward =
+        false;
+
+      // --------------------------------------------------------
+      // 尝试当前 frame 还没尝试过的方向
+      // --------------------------------------------------------
+
+      while (
+        frame.nextDir <
+        directions.length
+      ) {
+        const dir =
+          directions[
+          frame.nextDir++
+          ];
+
+        const nx =
+          frame.x + dir.dx;
+
+        const ny =
+          frame.y + dir.dy;
+
+        // 边界
+        if (
+          nx < 0 ||
+          nx >= w ||
+          ny < 0 ||
+          ny >= h
+        ) {
+          continue;
+        }
+
+        const nextId =
+          getId(nx, ny);
+
+        // 不是这个 Component 的像素
+        if (
+          !componentSet.has(nextId)
+        ) {
+          continue;
+        }
+
+        // 已经访问过
+        if (
+          visited.has(nextId)
+        ) {
+          continue;
+        }
+
+        // ------------------------------------------------------
+        // 找到新的目标像素
+        //
+        // 此时 A 正在按下。
+        // 因为 nextId 属于当前 Component，
+        // 所以这是绝对安全的一步。
+        // ------------------------------------------------------
+
+        tap(dir.button);
+
+        context.curX = nx;
+        context.curY = ny;
+
+        visited.add(nextId);
+
+        stack.push({
+          x: nx,
+          y: ny,
+          nextDir: 0,
+        });
+
+        movedForward = true;
+
+        break;
+      }
+
+      if (movedForward) {
+        continue;
+      }
+
+      // --------------------------------------------------------
+      // 当前像素所有方向都探索完毕
+      //
+      // 开始 DFS 回溯。
+      // --------------------------------------------------------
+
+      stack.pop();
+
+      // 已经回到了根节点
+      if (
+        stack.length === 0
+      ) {
+        break;
+      }
+
+      const parent =
+        stack[stack.length - 1];
+
+      // --------------------------------------------------------
+      // 当前点 -> 父节点
+      //
+      // 两者一定相邻。
+      //
+      // 而且父节点显然属于同一个 Component，
+      // 所以 A 按着回去也是安全的。
+      // --------------------------------------------------------
+
+      const direction =
+        directionFromTo(
+          {
+            x: context.curX,
+            y: context.curY,
+          },
+          {
+            x: parent.x,
+            y: parent.y,
+          }
+        );
+
+      tap(direction);
+
+      context.curX = parent.x;
+      context.curY = parent.y;
+    }
+
+    // ----------------------------------------------------------
+    // 安全检查
+    //
+    // 如果 visited 数量 != component 像素数，
+    // 说明算法出现了 bug。
+    // 此时宁可停止生成，也不要生成漏像素的脚本。
+    // ----------------------------------------------------------
+
+    if (
+      visited.size !==
+      component.pixels.length
+    ) {
+      up('A');
+
+      throw new Error(
+        `Component DFS incomplete: ` +
+        `visited=${visited.size}, ` +
+        `expected=${component.pixels.length}, ` +
+        `start=(${start.x},${start.y})`
+      );
+    }
+
+    // ----------------------------------------------------------
+    // 完成这个连通块
+    // ----------------------------------------------------------
+
+    up('A');
+
+    // DFS 回溯结构保证：
+    // 当前光标最终回到 start。
+    context.curX = start.x;
+    context.curY = start.y;
+  };
+
+  // ============================================================
+  // 绘制一种颜色的全部 Component
+  //
+  // Component 之间：
+  //
+  // 当前光标
+  //      ↓
+  // 找最近 Component
+  //      ↓
+  // 找这个 Component 内最近入口点
+  //      ↓
+  // 移动过去（A 松开）
+  //      ↓
+  // DOWN A
+  //      ↓
+  // DFS 整个 Component
+  //      ↓
+  // UP A
+  //
+  // 重复。
+  // ============================================================
+
+  const drawColorComponents = (
+    colorIndex: number,
+    components: Component[]
+  ) => {
+    if (
+      components.length === 0
+    ) {
+      return;
+    }
+
+    lines.push('');
+    lines.push(`# ==========================================`);
+    lines.push(`# 开始绘制颜色 ${colorIndex}`);
+    lines.push(`# 连通块数量: ${components.length}`);
+    lines.push(`# ==========================================`);
+
+    // ----------------------------------------------------------
+    // 用 Set 保存还没有绘制的 Component
+    // ----------------------------------------------------------
+
+    const remaining =
+      new Set<Component>(
+        components
+      );
+
+    let componentNumber = 0;
+
+    while (
+      remaining.size > 0
+    ) {
+      let bestComponent:
+        | Component
+        | null = null;
+
+      let bestEntry:
+        | Point
+        | null = null;
+
+      let bestDistance =
+        Infinity;
+
+      // --------------------------------------------------------
+      // 贪心：
+      // 当前光标 -> 所有剩余 Component
+      // 找 Manhattan 距离最小者。
+      // --------------------------------------------------------
+
+      for (
+        const component
+        of remaining
+      ) {
+        const result =
+          findNearestEntryPoint(
+            component
+          );
+
+        if (
+          result.distance <
+          bestDistance
+        ) {
+          bestDistance =
+            result.distance;
+
+          bestComponent =
+            component;
+
+          bestEntry =
+            result.point;
+        }
+      }
+
+      if (
+        !bestComponent ||
+        !bestEntry
+      ) {
+        throw new Error(
+          `Failed to find next component for color ${colorIndex}`
+        );
+      }
+
+      componentNumber++;
+
+      // lines.push('');
+      // lines.push(`# Color ${colorIndex}: Component ${componentNumber}/${components.length}`);
+      // lines.push(`# Pixels: ${bestComponent.pixels.length}`);
+      // lines.push(`# Entry: (${bestEntry.x},${bestEntry.y})`);
+      // lines.push(`# Distance from cursor: ${bestDistance}`);
+
+      // --------------------------------------------------------
+      // A 必须是松开的：
+      // 在不同 Component 之间可以随便移动。
+      // --------------------------------------------------------
+
+      moveTo(bestEntry.x, bestEntry.y);
+
+      // --------------------------------------------------------
+      // A 按住，一笔 DFS 完成整个 Component
+      // --------------------------------------------------------
+
+      drawComponentWithDFS(
+        bestComponent,
+        bestEntry
+      );
+
+      remaining.delete(
+        bestComponent
+      );
+    }
+
+    lines.push(`# 颜色 ${colorIndex} 全部连通块绘制完成`);
+  };
+
+  // ============================================================
+  // 开始建立所有颜色的 Component
+  //
+  // 只扫描一次整张图片。
+  // ============================================================
+
+  const componentsByColor =
+    buildAllColorComponents();
+
+  // ============================================================
+  // 开始
+  // ============================================================
+
+  initColorPanel();
+
+  const colorSize =
+    palette.length + 1;
+
+  // ============================================================
+  // 按原来的 9 色一批处理
+  //
+  // colorIndex:
+  //   1, 2, 3, ...
+  //
+  // slot:
+  //   0, 1, 2, ...
+  // ============================================================
+
+  let colorBatchStart = 1;
+
+  while (
+    colorBatchStart < colorSize
+  ) {
+    const colorBatchEnd =
+      Math.min(
+        colorBatchStart + 8,
+        colorSize - 1
+      );
+
+    lines.push('');
+    lines.push(`# ==========================================`);
+    lines.push(`# 绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`);
+    lines.push(`# ==========================================`);
+
+    // ----------------------------------------------------------
+    // 找这个 Batch 中实际存在的颜色
+    // ----------------------------------------------------------
+
+    const presentColors: number[] = [];
+
+    for (
+      let colorIndex =
+        colorBatchStart;
+      colorIndex <= colorBatchEnd;
+      colorIndex++
+    ) {
+      const components =
+        componentsByColor.get(
+          colorIndex
+        );
+
+      if (
+        components &&
+        components.length > 0
+      ) {
+        presentColors.push(
+          colorIndex
+        );
+      }
+    }
+
+    // ----------------------------------------------------------
+    // 整个 Batch 都没有像素
+    // ----------------------------------------------------------
+
+    if (
+      presentColors.length === 0
+    ) {
+      colorBatchStart += 9;
+      continue;
+    }
+
+    // ----------------------------------------------------------
+    // 只配置真正存在的颜色
+    //
+    // 不再无条件配置 9 个色槽。
+    // ----------------------------------------------------------
+
+    for (
+      const colorIndex
+      of presentColors
+    ) {
+      const slot =
+        colorIndex -
+        colorBatchStart;
+
+      chooseHSVColor(
+        slot,
+        colorIndex
+      );
+    }
+
+    // ----------------------------------------------------------
+    // 按颜色 Index 顺序绘制。
+    //
+    // 每个颜色内部，再对 Component 做贪心。
+    // ----------------------------------------------------------
+
+    for (
+      const colorIndex
+      of presentColors
+    ) {
+      const components =
+        componentsByColor.get(
+          colorIndex
+        );
+
+      if (
+        !components ||
+        components.length === 0
+      ) {
+        continue;
+      }
+
+      const slot =
+        colorIndex -
+        colorBatchStart;
+
+      chooseColorPanel(
+        slot
+      );
+
+      drawColorComponents(
+        colorIndex,
+        components
+      );
+    }
+
+    colorBatchStart += 9;
+  }
+
+  // ============================================================
+  // 全部绘制完成
+  // ============================================================
+
+  lines.push('');
+  lines.push(`# ==========================================`);
+  lines.push(`# 全图绘制完成，复位光标至 (0,0)`);
+  lines.push(`# ==========================================`);
+
+  // 此时 A 已经保证是 UP 状态
+  moveTo(0, 0);
+
+  return lines.join('\n');
+};
+
+export type MacroAlgorithmType = "segment" | "dfs";
+export interface MacroAlgorithm {
+  type: MacroAlgorithmType,
+  generator: MacroGenerator,
+};
+export const MacroAlgorithmMap: Record<MacroAlgorithmType, MacroAlgorithm> = {
+  "dfs": { type: "dfs", generator: generateZigMacroScriptDFS },
+  "segment": { type: "segment", generator: generateZigMacroScriptBySegment },
 };

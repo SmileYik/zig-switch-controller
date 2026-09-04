@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import './TomodachiLifeNormal.css';
 import { type PixelData, type RGBColor } from './color';
-import { generateZigMacroScriptBySegment } from './macroAlgorithm';
+import { MacroAlgorithmMap, type MacroAlgorithm, type MacroAlgorithmType } from './macroAlgorithm';
 import { generateZigByteArray, loadImageFromZigByteArray } from './image';
 import ColorPickerModal from './ColorPickerModal';
 import ImageEditorModal from './ImageEditorModal';
@@ -15,7 +15,7 @@ function TomodachiLifeNormal({
 }: TomodachiLifeNormalProps) {
   const [cropWidth, setCropWidth] = useState<number>(256);
   const [cropHeight, setCropHeight] = useState<number>(256);
-  const [delayMs, setDelayMs] = useState<number>(80);
+  const [delayMs, setDelayMs] = useState<number>(100);
 
   const [originalImage, setOriginalImage] = useState<HTMLImageElement | null>(null);
   const [croppedImage, setCroppedImage] = useState<HTMLImageElement | null>(null);
@@ -42,6 +42,15 @@ function TomodachiLifeNormal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showEditorModal, setShowEditorModal] = useState<boolean>(false);
+
+  const [macroAlgorithm, setMacroAlgorithm] = useState<MacroAlgorithm>(MacroAlgorithmMap.segment);
+  const onSetMarcoAlgorithm = (value: string) => {
+    let alg = MacroAlgorithmMap.segment;
+    Object.entries(MacroAlgorithmMap).forEach(([k, v]) => {
+      if (k === value) alg = v;
+    });
+    setMacroAlgorithm(alg);
+  }
 
   const quantizePixels = (rawPixels: PixelData[][], k: number, w: number, h: number) => {
     const validPixels: RGBColor[] = [];
@@ -349,8 +358,8 @@ function TomodachiLifeNormal({
   }, [byteArray]);
 
   const finalScript = useMemo(() => {
-    return generateZigMacroScriptBySegment(cropWidth, cropHeight, currentPalette, pixelIndices, delayMs);
-  }, [cropWidth, cropHeight, delayMs, currentPalette, pixelIndices]);
+    return macroAlgorithm.generator(cropWidth, cropHeight, currentPalette, pixelIndices, delayMs);
+  }, [cropWidth, cropHeight, delayMs, currentPalette, pixelIndices, macroAlgorithm]);
 
   const VIEWPORT_WIDTH = Math.max(360, cropWidth + 80);
   const VIEWPORT_HEIGHT = Math.max(360, cropHeight + 80);
@@ -585,19 +594,6 @@ function TomodachiLifeNormal({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                   <h3 className="m3-card-title" style={{ margin: 0 }}>宏脚本</h3>
                   <div style={{ display: 'flex', gap: '8px' }}>
-
-                    <label className="m3-input-field">
-                      延迟:
-                      <input
-                        type="number"
-                        min="10"
-                        max="1000"
-                        value={delayMs}
-                        onChange={(e) => setDelayMs(parseInt(e.target.value) || 80)}
-                        className="m3-input"
-                        style={{ width: '100px' }}
-                      />
-                    </label>
                     <button className="m3-btn m3-btn-outlined" onClick={() => navigator.clipboard.writeText(finalScript)}>
                       复制
                     </button>
@@ -608,6 +604,34 @@ function TomodachiLifeNormal({
                       准备运行
                     </button>
                   </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: '16px' }}>
+                    <label className="m3-input-field">
+                      算法:
+                      <select
+                        value={macroAlgorithm.type}
+                        onChange={(e) => onSetMarcoAlgorithm(e.target.value)}
+                        className="m3-input"
+                        style={{ width: '100px' }}
+                      >
+                        {(Object.keys(MacroAlgorithmMap) as MacroAlgorithmType[]).map(e => (
+                          <option value={e}>{e}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="m3-input-field">
+                      延迟:
+                      <input
+                        type="number"
+                        min="10"
+                        max="1000"
+                        value={delayMs}
+                        onChange={(e) => setDelayMs(parseInt(e.target.value) || 100)}
+                        className="m3-input"
+                        style={{ width: '100px' }}
+                      />
+                    </label>
                 </div>
 
                 <textarea readOnly value={finalScript} className="m3-code-block" />

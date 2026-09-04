@@ -604,6 +604,7 @@ export const Dashboard: React.FC = () => {
         chunkSize: chunkSize,
         finshCallback: () => {
           setStatusMessage({ text: `指令执行完成`, isError: false });
+          setGroupIdx(0);
         }
       })
       fetchAllStatus();

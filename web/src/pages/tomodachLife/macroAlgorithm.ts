@@ -13,6 +13,21 @@ type Point = {
   y: number;
 };
 
+type Tool = 'pen' | 'fill' | 'earse';
+const ToolIndex: Record<Tool, number> = {
+  'fill': 5,
+  'pen': 6,
+  'earse': 7,
+};
+
+type Direction = 'DPAD_LEFT' | 'DPAD_RIGHT' | 'DPAD_UP' | 'DPAD_DOWN';
+const directions = [
+  { dx: 1, dy: 0, button: 'DPAD_RIGHT' },
+  { dx: 0, dy: 1, button: 'DPAD_DOWN' },
+  { dx: -1, dy: 0, button: 'DPAD_LEFT' },
+  { dx: 0, dy: -1, button: 'DPAD_UP' },
+] as const;
+
 export interface ZigMacroScriptContext {
   readonly w: number;
   readonly h: number;
@@ -25,6 +40,7 @@ export interface ZigMacroScriptContext {
   curX: number;
   curY: number;
   curColorPanelIdx: number;
+  curTool: Tool,
 
   tap(button: string, space?: number): void;
   tapMultiple(button: string, count: number): void;
@@ -32,15 +48,82 @@ export interface ZigMacroScriptContext {
   down(button: string): void;
   up(button: string): void;
 
+  /**
+   * 注释
+   */
+  comment(msg: string): void;
+  /**
+   * 多行注释
+   */
+  comments(msgs: string[]): void;
+
+  /**
+   * 初始化工具槽位
+   */
+  initToolPanel(): void;
+  /**
+   * 选择工具槽位
+   */
+  chooseTool(tool: Tool): void;
+  /**
+   * 油漆桶, 将当前所在坐标的像素相邻连通的相同同色(无色)像素填入当前选择的颜色.
+   * 使用后当前工具将会切换成 'fill'
+   */
+  fill(): void;
+  /**
+   * 清除当前坐标的像素颜色, 使用后当前工具将会切换成 'earse'
+   */
+  earse(): void;
+  /**
+   * 开始连续清除, 使用后当前工具会切换成 'earse'
+   * 需要与 `endEarse()` 一同使用.
+   */
+  beginEarse(): void;
+  /**
+   * 停止连续清除, 使用后当前工具会切换成 'earse'.
+   * 需要与 `beginEarse()` 一同使用.
+   */
+  endEarse(): void;
+  /**
+   * 将选择颜色填入当前坐标, 使用后当前工具会切换成 'pen'
+   */
+  draw(): void;
+  /**
+   * 开始连续绘制, 使用后当前工具会切换成 'pen'
+   * 需要与 `endDraw()` 一同使用.
+   */
+  beginDraw(): void;
+  /**
+   * 停止连续绘制, 使用后当前工具会切换成 'pen'.
+   * 需要与 `beginDraw()` 一同使用.
+   */
+  endDraw(): void;
+
+  /**
+   * 初始化颜色面板
+   */
   initColorPanel(): void;
+  /**
+   * 选择指定颜色面板下标的颜色
+   * @param idx 颜色面板下标
+   */
   chooseColorPanel(idx: number): void;
+  /**
+   * 重置HSV颜色选色盘到左上角和(色域)最左边
+   */
   resetHSVColorPanel(): void;
+  /**
+   * 自动选择HSV颜色
+   * @param slotIdx 面板颜色下标
+   * @param colorIdx 离散颜色下标
+   */
   chooseHSVColor(slotIdx: number, colorIdx: number): void;
 
+  goto(direction: Direction, times: number): void,
   moveTo(targetX: number, targetY: number): void;
   getId(x: number, y: number): number;
   manhattanDistance(a: Point, b: Point): number;
-  directionFromTo(from: Point, to: Point): string;
+  directionFromTo(from: Point, to: Point): Direction;
 }
 
 const createZigMacroScriptContext = (
@@ -60,6 +143,7 @@ const createZigMacroScriptContext = (
     curX: 0,
     curY: 0,
     curColorPanelIdx: 0,
+    curTool: 'pen',
 
     tap: (button, space = 0) => context.lines.push(`${' '.repeat(space)}TAP ${delay}ms ${delay}ms ${button}`),
 
@@ -87,8 +171,73 @@ const createZigMacroScriptContext = (
       context.wait(delay);
     },
 
+    comment: (msg) => {
+      const msgs = msg.split("\n");
+      msgs.forEach(line => {
+        if (line.trim()) {
+          context.lines.push(`# ${line}`);
+        } else {
+          context.lines.push(``);
+        }
+      });
+    },
+    comments: (msgs) => msgs.forEach(line => context.comment(line)),
+
+    initToolPanel: () => {
+      context.comment('--- 初始化工具面板 ---');
+
+      // reset pen size
+      context.chooseTool('pen');
+      context.tapMultiple('X', 2);
+      context.tapMultiple('DPAD_LEFT', 2);
+      context.tapMultiple('A', 2);
+
+      // reset earse size
+      context.chooseTool('earse');
+      context.tap('X');
+      context.tapMultiple('DPAD_LEFT', 2);
+      context.tapMultiple('A', 2);
+
+      // reset to pen
+      context.chooseTool('pen');
+    },
+    chooseTool: (tool) => {
+      const curTool = context.curTool;
+      const curToolIdx = ToolIndex[curTool];
+      const nextToolIdx = ToolIndex[tool];
+      if (curToolIdx === nextToolIdx) return;
+
+      context.tap('X');
+      const direction = curToolIdx > nextToolIdx ? 'DPAD_LEFT' : 'DPAD_RIGHT';
+      context.tapMultiple(direction, Math.abs(curToolIdx - nextToolIdx));
+      context.tap('A');
+      context.curTool = tool;
+    },
+    fill: () => {
+      context.chooseTool('fill');
+      context.tap('A');
+    },
+    earse: () => {
+      context.chooseTool('earse');
+      context.tap('A');
+    },
+    beginEarse: () => {
+      context.chooseTool('earse');
+      context.down("A");
+    },
+    endEarse: () => context.up("A"),
+    draw: () => {
+      context.chooseTool('pen');
+      context.tap("A");
+    },
+    beginDraw: () => {
+      context.chooseTool('pen');
+      context.down("A");
+    },
+    endDraw: () => context.up("A"),
+
     initColorPanel: () => {
-      context.lines.push('# --- 初始化调色板面板 ---');
+      context.comment('--- 初始化调色板面板 ---');
 
       context.tap('Y');
       context.tapMultiple('DPAD_DOWN', 10);
@@ -121,7 +270,7 @@ const createZigMacroScriptContext = (
     },
 
     resetHSVColorPanel: () => {
-      context.lines.push('# --- 复位 HSV 调色板 ---');
+      context.comment('--- 复位 HSV 调色板 ---');
 
       context.wait(100);
       context.lines.push('STICK LEFT_STICK -100 +100');
@@ -147,11 +296,12 @@ const createZigMacroScriptContext = (
         color.b
       );
 
-      context.lines.push(
-        `\n# 配置色槽 Slot ${slotIdx} <- ` +
+      context.comments([
+        "",
+        `配置色槽 Slot ${slotIdx} <- ` +
         `调色板颜色 ${colorIdx}: ` +
         `RGB(${color.r},${color.g},${color.b})`
-      );
+      ]);
 
       context.wait(100);
       context.chooseColorPanel(slotIdx);
@@ -172,6 +322,7 @@ const createZigMacroScriptContext = (
       context.wait(100);
     },
 
+    goto: (direction, times) => context.tapMultiple(direction, times),
     moveTo: (targetX, targetY) => {
       const dx = targetX - context.curX;
       const dy = targetY - context.curY;
@@ -200,10 +351,11 @@ const createZigMacroScriptContext = (
       const dx = to.x - from.x;
       const dy = to.y - from.y;
 
-      if (dx === 1 && dy === 0) return 'DPAD_RIGHT';
-      if (dx === -1 && dy === 0) return 'DPAD_LEFT';
-      if (dx === 0 && dy === 1) return 'DPAD_DOWN';
-      if (dx === 0 && dy === -1) return 'DPAD_UP';
+      for (const d of directions) {
+        if (d.dx === dx && d.dy === dy) {
+          return d.button;
+        }
+      }
 
       throw new Error(
         `Invalid adjacent move: (${from.x},${from.y}) -> (${to.x},${to.y})`
@@ -261,10 +413,10 @@ export const generateZigMacroScriptBySegment = (
   const context = createZigMacroScriptContext(w, h, palette, pIndices, delay);
 
   const {
-    lines,
-    tapMultiple,
-    down,
-    up,
+    goto,
+    beginDraw,
+    endDraw,
+    initToolPanel,
     initColorPanel,
     chooseColorPanel,
     chooseHSVColor,
@@ -278,21 +430,24 @@ export const generateZigMacroScriptBySegment = (
   const manhattan = manhattanDistance;
   const totalCells = w * h;
 
-  // lines.push('# ==========================================');
-  // lines.push('# Tomodachi Life 自动化绘制宏脚本');
-  // lines.push('# 线段优化策略:');
-  // lines.push('# 1. 同色像素按水平/垂直最大连续线段压缩');
-  // lines.push('# 2. 预先建立“线段连接图”，全局规划可连续保持 A 的线段链');
-  // lines.push('# 3. 优先保留受限端点连接，并避免闭环导致的无效回路');
-  // lines.push('# 4. 每个连通块同时评估 H/V 两种方案，按实际移动 + A 开关时间择优');
-  // lines.push('# 5. A 按住时只经过当前颜色像素，保证不串色、不漏像素');
-  // lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
-  // lines.push('# ==========================================\n');
-  lines.push('# ==========================================');
-  lines.push('# Tomodachi Life 自动化绘制宏脚本');
-  lines.push('# 线段优化策略');
-  lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
-  lines.push('# ==========================================\n');
+  // context.comment('==========================================');
+  // context.comment('Tomodachi Life 自动化绘制宏脚本');
+  // context.comment('线段优化策略:');
+  // context.comment('1. 同色像素按水平/垂直最大连续线段压缩');
+  // context.comment('2. 预先建立“线段连接图”，全局规划可连续保持 A 的线段链');
+  // context.comment('3. 优先保留受限端点连接，并避免闭环导致的无效回路');
+  // context.comment('4. 每个连通块同时评估 H/V 两种方案，按实际移动 + A 开关时间择优');
+  // context.comment('5. A 按住时只经过当前颜色像素，保证不串色、不漏像素');
+  // context.comment(`尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
+  // context.comment('==========================================\n');
+  context.comments([
+    '==========================================',
+    'Tomodachi Life 自动化绘制宏脚本',
+    '线段优化策略',
+    `尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`,
+    '==========================================',
+    ''
+  ]);
 
   // ------------------------------------------------------------
   // 组件标记：避免每个线段都创建 Set，且 H/V 复用同一块连续内存。
@@ -546,18 +701,18 @@ export const generateZigMacroScriptBySegment = (
       (a: ConnectionEdge, b: ConnectionEdge) =>
         portDegree[a.p] + portDegree[a.q] - (portDegree[b.p] + portDegree[b.q]) ||
         segmentDegree[a.u] + segmentDegree[a.v] -
-          (segmentDegree[b.u] + segmentDegree[b.v]),
+        (segmentDegree[b.u] + segmentDegree[b.v]),
 
       (a: ConnectionEdge, b: ConnectionEdge) =>
         segmentDegree[a.u] + segmentDegree[a.v] -
-          (segmentDegree[b.u] + segmentDegree[b.v]) ||
+        (segmentDegree[b.u] + segmentDegree[b.v]) ||
         portDegree[a.p] + portDegree[a.q] - (portDegree[b.p] + portDegree[b.q]),
 
       (a: ConnectionEdge, b: ConnectionEdge) =>
         Math.max(portDegree[a.p], portDegree[a.q]) -
-          Math.max(portDegree[b.p], portDegree[b.q]) ||
+        Math.max(portDegree[b.p], portDegree[b.q]) ||
         Math.min(portDegree[a.p], portDegree[a.q]) -
-          Math.min(portDegree[b.p], portDegree[b.q]),
+        Math.min(portDegree[b.p], portDegree[b.q]),
     ];
 
     for (const compare of comparators) {
@@ -1062,7 +1217,7 @@ export const generateZigMacroScriptBySegment = (
       const strokeStart = item.reverse ? first.end : first.start;
 
       moveTo(strokeStart.x, strokeStart.y);
-      down('A');
+      beginDraw();
 
       for (let j = 0; j < itemCount; j++) {
         const chainItem = item.reverse
@@ -1083,16 +1238,16 @@ export const generateZigMacroScriptBySegment = (
           if (
             manhattan(previousEnd, start) !== 1
           ) {
-            up('A');
+            endDraw();
             throw new Error(
               `Invalid segment chain connection: ` +
-                `(${previousEnd.x},${previousEnd.y}) -> ` +
-                `(${start.x},${start.y})`
+              `(${previousEnd.x},${previousEnd.y}) -> ` +
+              `(${start.x},${start.y})`
             );
           }
 
           const direction = directionFromTo(previousEnd, start);
-          tapMultiple(direction, 1);
+          goto(direction, 1);
           context.curX = start.x;
           context.curY = start.y;
         }
@@ -1105,14 +1260,14 @@ export const generateZigMacroScriptBySegment = (
         if (dx === 0 && dy === 0) {
           // 单点线段，无需移动。
         } else if (dy === 0) {
-          tapMultiple(dx > 0 ? 'DPAD_RIGHT' : 'DPAD_LEFT', Math.abs(dx));
+          goto(dx > 0 ? 'DPAD_RIGHT' : 'DPAD_LEFT', Math.abs(dx));
         } else if (dx === 0) {
-          tapMultiple(dy > 0 ? 'DPAD_DOWN' : 'DPAD_UP', Math.abs(dy));
+          goto(dy > 0 ? 'DPAD_DOWN' : 'DPAD_UP', Math.abs(dy));
         } else {
-          up('A');
+          endDraw();
           throw new Error(
             `Invalid segment direction: ` +
-              `(${start.x},${start.y}) -> (${end.x},${end.y})`
+            `(${start.x},${start.y}) -> (${end.x},${end.y})`
           );
         }
 
@@ -1120,7 +1275,7 @@ export const generateZigMacroScriptBySegment = (
         context.curY = end.y;
       }
 
-      up('A');
+      endDraw();
     }
   };
 
@@ -1305,11 +1460,13 @@ export const generateZigMacroScriptBySegment = (
     colorIndex: number,
     components: ComponentPlan[]
   ) => {
-    lines.push('');
-    lines.push('# ==========================================');
-    lines.push(`# 开始绘制颜色 ${colorIndex}`);
-    lines.push(`# 连通块数量: ${components.length}`);
-    lines.push('# ==========================================');
+    context.comments([
+      "",
+      '==========================================',
+      `开始绘制颜色 ${colorIndex}`,
+      `连通块数量: ${components.length}`,
+      '=========================================='
+    ]);
 
     const remaining = new Set<ComponentPlan>(components);
 
@@ -1341,7 +1498,7 @@ export const generateZigMacroScriptBySegment = (
       remaining.delete(bestComponent);
     }
 
-    lines.push(`# 颜色 ${colorIndex} 全部连通块绘制完成`);
+    context.comment(`颜色 ${colorIndex} 全部连通块绘制完成`);
   };
 
   // ============================================================
@@ -1350,6 +1507,7 @@ export const generateZigMacroScriptBySegment = (
 
   const componentsByColor = buildAllColorComponents();
 
+  initToolPanel();
   initColorPanel();
 
   const colorSize = palette.length + 1;
@@ -1361,12 +1519,12 @@ export const generateZigMacroScriptBySegment = (
       colorSize - 1
     );
 
-    lines.push('');
-    lines.push('# ==========================================');
-    lines.push(
-      `# 绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`
-    );
-    lines.push('# ==========================================');
+    context.comments([
+      "",
+      '==========================================',
+      `绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`,
+      '=========================================='
+    ]);
 
     const presentColors: number[] = [];
 
@@ -1421,10 +1579,12 @@ export const generateZigMacroScriptBySegment = (
 
       const slot = bestColor - colorBatchStart;
 
-      lines.push('');
-      lines.push('# ==========================================');
-      lines.push(`# 绘制颜色 ${bestColor} (Slot ${slot})`);
-      lines.push('# ==========================================');
+      context.comments([
+        "",
+        '==========================================',
+        `绘制颜色 ${bestColor} (Slot ${slot})`,
+        '=========================================='
+      ]);
 
       chooseColorPanel(slot);
       drawColor(
@@ -1438,15 +1598,16 @@ export const generateZigMacroScriptBySegment = (
     colorBatchStart += 9;
   }
 
-  lines.push('');
-  lines.push('# ==========================================');
-  lines.push('# 全图绘制完成，复位光标至 (0,0)');
-  lines.push('# ==========================================');
-
+  context.comments(["",
+    '==========================================',
+    "全图绘制完成，复位光标至 (0,0)",
+    '=========================================='
+  ]);
   moveTo(0, 0);
 
-  return lines.join('\n');
+  return context.lines.join('\n');
 };
+
 export const generateZigMacroScriptDFS = (
   w: number,
   h: number,
@@ -1467,55 +1628,47 @@ export const generateZigMacroScriptDFS = (
   const context = createZigMacroScriptContext(w, h, palette, pIndices, delay);
 
   const {
-    lines,
-    tap,
-    down,
-    up,
+    goto,
+    beginDraw,
+    endDraw,
+    initToolPanel,
     initColorPanel,
     chooseColorPanel,
     chooseHSVColor,
     moveTo,
     getId,
     manhattanDistance,
+    directionFromTo,
   } = context;
 
-  // lines.push('# ==========================================');
-  // lines.push('# Tomodachi Life 自动化绘制宏脚本');
+  // context.comment('==========================================');
+  // context.comment('Tomodachi Life 自动化绘制宏脚本');
   // lines.push('#');
-  // lines.push('# DFS 路径优化策略：');
-  // lines.push('# 1. 一次扫描整张图，建立每种颜色的 4 邻接连通块');
-  // lines.push('# 2. 一个颜色连通块只绘制一次，完成后才进入下一个连通块');
-  // lines.push('# 3. 连通块内先建立 DFS 生成树，再执行“开放式 DFS”');
-  // lines.push('# 4. 最终路径上的树边只走一次，其余树边走两次');
-  // lines.push('# 5. 因此连通块移动步数从固定的 2(N-1) 降为 2(N-1)-D');
-  // lines.push('#    其中 D 是 DFS 生成树中入口到最深节点的深度');
-  // lines.push('# 6. 使用低可用度优先（Warnsdorff 风格）尝试多种方向顺序，尽量让 D 更大');
-  // lines.push('# 7. A 按下期间始终只在当前连通块内移动');
-  // lines.push('# 8. 连通块之间仍然 UP A 后再移动');
-  // lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
-  // lines.push('# ==========================================');
+  // context.comment('DFS 路径优化策略：');
+  // context.comment('1. 一次扫描整张图，建立每种颜色的 4 邻接连通块');
+  // context.comment('2. 一个颜色连通块只绘制一次，完成后才进入下一个连通块');
+  // context.comment('3. 连通块内先建立 DFS 生成树，再执行“开放式 DFS”');
+  // context.comment('4. 最终路径上的树边只走一次，其余树边走两次');
+  // context.comment('5. 因此连通块移动步数从固定的 2(N-1) 降为 2(N-1)-D');
+  // context.comment('   其中 D 是 DFS 生成树中入口到最深节点的深度');
+  // context.comment('6. 使用低可用度优先（Warnsdorff 风格）尝试多种方向顺序，尽量让 D 更大');
+  // context.comment('7. A 按下期间始终只在当前连通块内移动');
+  // context.comment('8. 连通块之间仍然 UP A 后再移动');
+  // context.comment(`尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
+  // context.comment('==========================================');
   // lines.push('');
 
-  lines.push('# ==========================================');
-  lines.push('# Tomodachi Life 自动化绘制宏脚本');
-  lines.push('#');
-  lines.push('# DFS 路径优化策略：');
-  lines.push('# 1. 扫描各个颜色的所有连通块');
-  lines.push('# 2. 一次性将一种颜色的所有连通块绘制完成, 之后再绘制下一个颜色');
-  lines.push(`# 尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`);
-  lines.push('# ==========================================');
-  lines.push('');
-
-  // ============================================================
-  // 四方向
-  // ============================================================
-
-  const directions = [
-    { dx: 1, dy: 0, button: 'DPAD_RIGHT' },
-    { dx: 0, dy: 1, button: 'DPAD_DOWN' },
-    { dx: -1, dy: 0, button: 'DPAD_LEFT' },
-    { dx: 0, dy: -1, button: 'DPAD_UP' },
-  ] as const;
+  
+  context.comments([
+    '==========================================',
+    'Tomodachi Life 自动化绘制宏脚本',
+    'DFS 路径优化策略：',
+    '1. 扫描各个颜色的所有连通块',
+    '2. 一次性将一种颜色的所有连通块绘制完成, 之后再绘制下一个颜色',
+    `尺寸: ${w}x${h} | 颜色数: ${palette.length} | 延迟: ${delay}ms`,
+    '==========================================',
+    ''
+  ]);
 
   // ============================================================
   // 一次性建立整个图像的所有颜色连通块
@@ -1834,23 +1987,8 @@ export const generateZigMacroScriptDFS = (
   // ============================================================
 
   const moveOnePoint = (from: Point, to: Point) => {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-
-    if (dx === 1 && dy === 0) {
-      tap('DPAD_RIGHT');
-    } else if (dx === -1 && dy === 0) {
-      tap('DPAD_LEFT');
-    } else if (dx === 0 && dy === 1) {
-      tap('DPAD_DOWN');
-    } else if (dx === 0 && dy === -1) {
-      tap('DPAD_UP');
-    } else {
-      throw new Error(
-        `Invalid adjacent move: (${from.x},${from.y}) -> (${to.x},${to.y})`
-      );
-    }
-
+    const direction = directionFromTo(from, to);
+    goto(direction, 1);
     context.curX = to.x;
     context.curY = to.y;
   };
@@ -1977,7 +2115,7 @@ export const generateZigMacroScriptDFS = (
     // DOWN A：开始绘制当前连通块。
     // ----------------------------------------------------------
 
-    down('A');
+    beginDraw();
 
     // ----------------------------------------------------------
     // 沿 finalPath 一直向前：
@@ -2014,14 +2152,14 @@ export const generateZigMacroScriptDFS = (
     // tap 计数无法直接从 context 获取，因此只验证结构：
     // 最深节点存在且 finalPath 覆盖 root -> deepest。
     if (finalPath.length !== tree.depth[deepest] + 1) {
-      up('A');
+      endDraw();
       throw new Error(
         `Optimized DFS path mismatch: ` +
         `path=${finalPath.length}, depth=${tree.depth[deepest]}`
       );
     }
 
-    up('A');
+    endDraw();
 
     context.curX = component.pixels[deepest].x;
     context.curY = component.pixels[deepest].y;
@@ -2044,11 +2182,12 @@ export const generateZigMacroScriptDFS = (
       return;
     }
 
-    lines.push('');
-    lines.push('# ==========================================');
-    lines.push(`# 开始绘制颜色 ${colorIndex}`);
-    lines.push(`# 连通块数量: ${components.length}`);
-    lines.push('# ==========================================');
+    context.comments(['',
+      '==========================================',
+      `开始绘制颜色 ${colorIndex}`,
+      `连通块数量: ${components.length}`,
+      '=========================================='
+    ]);
 
     const remaining = new Set<Component>(components);
 
@@ -2082,7 +2221,7 @@ export const generateZigMacroScriptDFS = (
       remaining.delete(bestComponent);
     }
 
-    lines.push(`# 颜色 ${colorIndex} 全部连通块绘制完成`);
+    context.comment(`颜色 ${colorIndex} 全部连通块绘制完成`);
   };
 
   // ============================================================
@@ -2091,6 +2230,7 @@ export const generateZigMacroScriptDFS = (
 
   const componentsByColor = buildAllColorComponents();
 
+  initToolPanel();
   initColorPanel();
 
   const colorSize = palette.length + 1;
@@ -2107,12 +2247,11 @@ export const generateZigMacroScriptDFS = (
       colorSize - 1
     );
 
-    lines.push('');
-    lines.push('# ==========================================');
-    lines.push(
-      `# 绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`
-    );
-    lines.push('# ==========================================');
+    context.comments(['',
+      '==========================================',
+      `绘制批次: 颜色 ${colorBatchStart} ~ ${colorBatchEnd}`,
+      '=========================================='
+    ]);
 
     const presentColors: number[] = [];
 
@@ -2155,14 +2294,15 @@ export const generateZigMacroScriptDFS = (
     colorBatchStart += 9;
   }
 
-  lines.push('');
-  lines.push('# ==========================================');
-  lines.push('# 全图绘制完成，复位光标至 (0,0)');
-  lines.push('# ==========================================');
+  context.comments(['',
+    '==========================================',
+    '全图绘制完成，复位光标至 (0,0)',
+    '==========================================',
+  ]);
 
   moveTo(0, 0);
 
-  return lines.join('\n');
+  return context.lines.join('\n');
 };
 
 export type MacroAlgorithmType = "segment" | "dfs";

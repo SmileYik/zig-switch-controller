@@ -6,6 +6,7 @@ import { generateZigByteArray, loadImageFromZigByteArray } from './image';
 import ColorPickerModal from './ColorPickerModal';
 import ImageEditorModal from './ImageEditorModal';
 import { type QuantizeAlgorithm, QuantizeAlgorithmMap, type QuantizeType } from './quantizeAlgorithm';
+import { compressMacro } from '../../compressMacro';
 
 interface TomodachiLifeNormalProps {
   onChangeScript: (value: string) => void;
@@ -43,6 +44,8 @@ function TomodachiLifeNormal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showEditorModal, setShowEditorModal] = useState<boolean>(false);
+
+  const [compressScript, setCompressScript] = useState<boolean>(false);
 
   const [macroAlgorithm, setMacroAlgorithm] = useState<MacroAlgorithm>(MacroAlgorithmMap.segment);
   const onSetMarcoAlgorithm = (value: string) => {
@@ -296,8 +299,12 @@ function TomodachiLifeNormal({
   }, [byteArray]);
 
   const finalScript = useMemo(() => {
-    return macroAlgorithm.generator(cropWidth, cropHeight, currentPalette, pixelIndices, delayMs);
-  }, [cropWidth, cropHeight, delayMs, currentPalette, pixelIndices, macroAlgorithm]);
+    const script = macroAlgorithm.generator(cropWidth, cropHeight, currentPalette, pixelIndices, delayMs);
+    if (compressScript) {
+      return "# 已压缩\n" + compressMacro(script.split("\n")).join("\n");
+    }
+    return script;
+  }, [cropWidth, cropHeight, delayMs, currentPalette, pixelIndices, macroAlgorithm, compressScript]);
 
   const VIEWPORT_WIDTH = Math.max(360, cropWidth + 80);
   const VIEWPORT_HEIGHT = Math.max(360, cropHeight + 80);
@@ -548,6 +555,10 @@ function TomodachiLifeNormal({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                   <h3 className="m3-card-title" style={{ margin: 0 }}>宏脚本</h3>
                   <div style={{ display: 'flex', gap: '8px' }}>
+                    <label className="m3-btn m3-btn-outlined">
+                      <input className="checkbox" type='checkbox' checked={compressScript} onChange={e => setCompressScript(e.target.checked)}></input>
+                      压缩
+                    </label>
                     <button className="m3-btn m3-btn-outlined" onClick={() => navigator.clipboard.writeText(finalScript)}>
                       复制
                     </button>
